@@ -2,6 +2,8 @@
 
 set -o pipefail
 
+CONFIG_DIR="${HOME}/.config/clanime"
+
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
 seasonBaseURL="${mainURL}/seasons"
@@ -150,10 +152,10 @@ confirmModifiers() {
 selectPlaylistIndex() {
   assertTask 'Awaiting user selection for playlist index file...'
   if ! playlistIndex=$(
-    find archive/playlist-index/*"${seriesTitle}"* |
+    find "${CONFIG_DIR}"/playlist-index/*"${seriesTitle}"* |
       fzf --header 'Select a playlist index file' \
         --tac \
-        --with-nth 3.. \
+        --with-nth 7.. \
         --delimiter '/' \
         --preview 'cat {} 2>/dev/null | head -200'
   ); then
@@ -161,7 +163,7 @@ selectPlaylistIndex() {
     assertTryAgain selectPlaylistIndex
   fi
 
-  assertSuccess "Playlist index file:" "\n${playlistIndex}\n"
+  assertSuccess "Playlist index file:" "\n${playlistIndex/#$HOME/\~}\n"
 }
 
 playlistSelection() {
@@ -233,11 +235,12 @@ playlistFilter() {
 }
 
 parsePlaylistIndex() {
-  [[ -d archive/playlist-index ]] || mkdir -p 'archive/playlist-index'
+  [[ -d ${CONFIG_DIR}/playlist-index ]] ||
+    mkdir -p "${CONFIG_DIR}/playlist-index"
   playlistFilter
-  playlistIndexDIR='archive/playlist-index'
+  playlistIndexDIR="${CONFIG_DIR}/playlist-index"
   playlistIndex="${playlistIndexDIR}/$(date '+%Y-%m-%d') - ${seriesTitle}.txt"
-  assertSuccess "Cache file:" "\n${playlistIndex}"
+  assertSuccess "Cache file:" "\n${playlistIndex/#$HOME/\~}"
   assertSuccess 'Data output: INDEX | SEASON_NUMBER | TITLE'
 
   if youtube-dl "${seriesURL}" \
@@ -271,7 +274,8 @@ customizeConfigFile() {
   )
 
   if [[ ${selectRange} == Yes ]]; then
-    if compgen -G "archive/playlist-index/*${seriesTitle}*" >/dev/null; then
+    playlistIndexQuery="${CONFIG_DIR}/playlist-index/*${seriesTitle}*"
+    if compgen -G "${playlistIndexQuery}" >/dev/null; then
       assertSuccess "Found one or more playlist index locally\n"
 
       playlistIndexPrompt=$(
@@ -319,7 +323,7 @@ getConfigFilename() {
   readPrompt "${seriesTitle}"
   confFilename=$(safeFilename <<<"${seriesTitle}${textInput}").conf
 
-  while [[ -f config/${confFilename} ]]; do
+  while [[ -f ${CONFIG_DIR}/${confFilename} ]]; do
     assertWarning 'A file with the same name already exists'
     conflictPrompt=$(
       assertSelection '
@@ -352,7 +356,7 @@ getConfigFilename() {
   )
 
   if [[ ${confirmConfFile} == Yes* ]]; then
-    confFile="config/${confFilename}"
+    confFile="${CONFIG_DIR}/${confFilename}"
     assertSuccess "Config filename:" "\n${confFilename}\n"
   else
     getConfigFilename
@@ -360,22 +364,22 @@ getConfigFilename() {
 }
 
 createConfigFile() {
-  if [[ ! -d config ]]; then
-    assertTask "Creating 'config' subfolder..."
-    mkdir 'config'
-    assertSuccess "Created 'config' subfolder\n"
+  if [[ ! -d ${CONFIG_DIR} ]]; then
+    assertTask "Creating 'config' directory..."
+    mkdir -p "${CONFIG_DIR}"
+    assertSuccess "Config directory:" "\n${CONFIG_DIR}\n"
   fi
 
   assertTask 'Awaiting user input for config filename...'
   getConfigFilename
 
-  assertTask 'Creating a custom config file...'
+  assertTask 'Customizing config file...'
   customizeConfigFile
 
   assertTask 'Saving new config file...'
   if [[ -f ${confFile} ]]; then
     configFound=true
-    assertSuccess "Config file:" "\n${confFile}\n"
+    assertSuccess "Config file:" "\n${confFile/#$HOME/\~}\n"
   else
     assertError 'Config file not found!'
     exit 1
@@ -385,9 +389,9 @@ createConfigFile() {
 selectConfigFile() {
   assertTask 'Awaiting user selection for config file...'
   if ! confFile=$(
-    find "config/${seriesTitle}"* |
+    find "${CONFIG_DIR}/${seriesTitle}"* |
       fzf --header 'Select a config file' \
-        --with-nth 2.. \
+        --with-nth 6.. \
         --delimiter '/' \
         --preview 'cat {} 2>/dev/null | head -200'
 
@@ -395,15 +399,17 @@ selectConfigFile() {
     assertError 'No config file was selected'
     assertTryAgain selectConfigFile
   else
-    assertSuccess "Config file:" "\n${confFile}\n"
+    confFilename=$(awk -F '/' '{print $6}' <<<"${confFile}")
     isCustom=$(
       assertSelection "
         Do you want to customize this config file?
-        $(assertSuccess "Config file: '${confFile}'")
+        $(assertSuccess "Config file: '${confFilename}'")
         Yes
         No
       " --header-lines 2
     )
+
+    assertSuccess "Config file:" "\n${confFile/#$HOME/\~}\n"
 
     if [[ ${isCustom} == Yes ]]; then
       assertTask 'Finding local playlist index...'
@@ -517,13 +523,14 @@ fetchSeasons() {
 findConfig() {
   assertTask 'Finding custom config file for this series...'
   # via https://stackoverflow.com/a/34195247
-  if compgen -G "config/${seriesTitle}*" >/dev/null; then
+  if compgen -G "${CONFIG_DIR}/${seriesTitle}*" >/dev/null; then
     assertSuccess "Found one or more youtube-dl config files for this series\n"
     configFound=true
   else
     assertMissing "No config file found\n"
   fi
 }
+
 processConfig() {
   if [[ ${configFound} ]]; then
     useExistingConf=$(
@@ -562,7 +569,7 @@ stream() {
     assertTask 'Creating MPV config templates...'
     mkdir -p ~/.config/mpv
     cp -r /usr/local/share/doc/mpv/ ~/.config/mpv/
-    assertSuccess "MPV config file:" "\n${mpvConf}\n"
+    assertSuccess "MPV config file:" "\n${mpvConf/#$HOME/\~}\n"
   fi
 
   if ! grep -q '\[crunchyroll\]' "${mpvConf}"; then
