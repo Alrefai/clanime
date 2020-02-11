@@ -374,6 +374,7 @@ createConfigFile() {
 
   assertTask 'Saving new config file...'
   if [[ -f ${confFile} ]]; then
+    configFound=true
     assertSuccess "Config file:" "\n${confFile}\n"
   else
     assertError 'Config file not found!'
