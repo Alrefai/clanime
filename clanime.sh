@@ -13,7 +13,6 @@ playlistQuery='a.portrait-element::attr(href)'
 titlesQuery='a.portrait-element > span > img::attr(alt)'
 
 # Font styling and colors
-# via https://misc.flogisoft.com/bash/tip_colors_and_formatting
 boldText=$'\e[1m'
 greenBoldText=$'\e[1;32m'
 redBoldText=$'\e[1;31m'
@@ -55,7 +54,6 @@ assertWarning() {
 }
 
 assertError() {
-  # via https://github.com/Homebrew/brew/blob/50354852f492f85b109f7e5d9c1cffd3a85f9808/Library/Homebrew/brew.sh#L38-L51
   echo -n "${redUnderlinedText}Error${reset}: " >&2
 
   if [[ $# == 0 ]]; then
@@ -399,7 +397,7 @@ selectConfigFile() {
     assertError 'No config file was selected'
     assertTryAgain selectConfigFile
   else
-    confFilename=$(awk -F '/' '{print $6}' <<<"${confFile}")
+    confFilename=$(basename "${confFile}")
     isCustom=$(
       assertSelection "
         Do you want to customize this config file?
@@ -421,19 +419,16 @@ selectConfigFile() {
 }
 
 selectSeries() {
-  # via https://github.com/junegunn/fzf/issues/1660#issuecomment-571968327
   series=$(cat -n <<<"${seriesTitles}" | fzf --with-nth 2..)
 
   if [[ ${series} ]]; then
     seriesIndex=$(awk '{print $1}' <<<"${series}")
     seriesTitle=$(awk -F '\t' '{print $2}' <<<"${series}")
-    # via https://stackoverflow.com/a/6022431
     seriesURL=$(sed "${seriesIndex}q;d" <<<"${seriesList}")
     assertSuccess "Series: ${seriesTitle}"
     assertSuccess "URL:" "\n${seriesURL}\n"
   else
     assertError 'No title selected'
-    # assertTryAgain selectSeries
     handleSeriesError=$(
       assertSelection '
         Select another series
@@ -483,8 +478,6 @@ createSeriesList() {
   if [[ ! ${seriesTitles} ]]; then
     assertError 'Could not parse titles from series list HTML document'
     exit 1
-  # else
-  #   assertSuccess "Titles: ${season^}" "\n${seriesTitles\n}"
   fi
 }
 
@@ -522,7 +515,6 @@ fetchSeasons() {
 
 findConfig() {
   assertTask 'Finding custom config file for this series...'
-  # via https://stackoverflow.com/a/34195247
   if compgen -G "${CONFIG_DIR}/${seriesTitle}*" >/dev/null; then
     assertSuccess "Found one or more youtube-dl config files for this series\n"
     configFound=true
