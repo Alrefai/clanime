@@ -588,14 +588,14 @@ stream() {
     [[ ${reviewConf} == Yes ]] && ${EDITOR:-vi} "${mpvConf}"
   fi
 
-  player=$(
+  player=${ANIME_PLAYER:-$(
     assertSelection '
       Choose a media player
       IINA
       MPV
       Abort
     ' --header-lines 1
-  )
+  )}
 
   streamMessage() {
     assertSuccess "Enjoy watching high quality stream\n"
@@ -612,7 +612,6 @@ stream() {
   else
     assertError 'Aborted by user'
   fi
-
 }
 
 processStream() {
