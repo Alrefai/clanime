@@ -588,19 +588,27 @@ stream() {
     [[ ${reviewConf} == Yes ]] && ${EDITOR:-vi} "${mpvConf}"
   fi
 
-  launchStream=$(
+  player=$(
     assertSelection '
-      Launch IINA player?
-      Yes
+      Choose a media player
+      IINA
+      MPV
       Abort
     ' --header-lines 1
   )
 
-  if [[ ${launchStream} == Yes ]]; then
+  streamMessage() {
     assertSuccess "Enjoy watching high quality stream\n"
     playUnicode="${blueText}\u25B6${reset}"
-    echo -e "${playUnicode} Opening '${seriesTitle}' stream in IINA..."
+    echo -e "${playUnicode} Opening '${seriesTitle}' stream in ${player}..."
+  }
+
+  if [[ ${player} == IINA ]]; then
+    streamMessage
     iina "${seriesURL}" -- --profile=crunchyroll "$@"
+  elif [[ ${player} == MPV ]]; then
+    streamMessage
+    mpv --profile=crunchyroll "$@" -- "${seriesURL}"
   else
     assertError 'Aborted by user'
   fi
