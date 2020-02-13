@@ -627,7 +627,7 @@ processStream() {
 }
 
 if [[ $1 =~ ^((--)?help|-h)$ ]]; then
-  iina --help
+  mpv --help
   exit
 fi
 
