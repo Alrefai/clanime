@@ -1,4 +1,3 @@
-tap "homebrew/cask"
 brew "bash"
 brew "wget"
 brew "html-xml-utils"
@@ -6,4 +5,7 @@ brew "fzf"
 brew "jq"
 brew "youtube-dl"
 brew "mpv"
-cask "iina"
+
+# Uncomment following lines to install IINA player via installation script
+# tap "homebrew/cask"
+# cask "iina"

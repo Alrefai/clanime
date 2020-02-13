@@ -588,6 +588,8 @@ stream() {
     [[ ${reviewConf} == Yes ]] && ${EDITOR:-vi} "${mpvConf}"
   fi
 
+  command -v iina >/dev/null 2>&1 || ANIME_PLAYER=MPV
+
   player=${ANIME_PLAYER:-$(
     assertSelection '
       Choose a media player
