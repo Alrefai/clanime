@@ -657,25 +657,29 @@ processStream() {
   fi
 }
 
+browse() {
+  assertTask 'Fetching series seasons list from crunchyroll.com...'
+  fetchSeasons
+  findConfig
+}
+
 if [[ $1 =~ ^((--)?help|-h)$ ]]; then
   mpv --help
   exit
 fi
 
-assertTask 'Fetching series seasons list from crunchyroll.com...'
-fetchSeasons
-findConfig
-
 main=$(
   assertSelection "
-    Stream
-    Process configurations ${yellowBoldText}ONLY${reset}
+    Seasons List
+    Process Configurations ${yellowBoldText}ONLY${reset}
   " --phony
 )
 
-if [[ ${main} == Stream* ]]; then
+if [[ ${main} != Process* ]]; then
+  browse
   processStream "$@"
 else
+  browse
   while true; do
     processConfig
     repeat=$(
