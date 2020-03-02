@@ -161,7 +161,7 @@ selectPlaylistIndex() {
     assertTryAgain selectPlaylistIndex
   fi
 
-  assertSuccess "Playlist index file:" "\n${playlistIndex/#$HOME/\~}\n"
+  assertSuccess "Playlist index file:" "${playlistIndex/#$HOME/\~}\n"
 }
 
 playlistSelection() {
@@ -238,7 +238,7 @@ parsePlaylistIndex() {
   playlistFilter
   playlistIndexDIR="${CONFIG_DIR}/playlist-index"
   playlistIndex="${playlistIndexDIR}/$(date '+%Y-%m-%d') - ${seriesTitle}.txt"
-  assertSuccess "Cache file:" "\n${playlistIndex/#$HOME/\~}"
+  assertSuccess "Cache file:" "${playlistIndex/#$HOME/\~}"
   assertSuccess 'Data output: INDEX | SEASON_NUMBER | TITLE'
 
   if youtube-dl "${seriesURL}" \
@@ -355,7 +355,7 @@ getConfigFilename() {
 
   if [[ ${confirmConfFile} == Yes* ]]; then
     confFile="${CONFIG_DIR}/${confFilename}"
-    assertSuccess "Config filename:" "\n${confFilename}\n"
+    assertSuccess "Config filename:" "${confFilename}\n"
   else
     getConfigFilename
   fi
@@ -365,7 +365,7 @@ createConfigFile() {
   if [[ ! -d ${CONFIG_DIR} ]]; then
     assertTask "Creating 'config' directory..."
     mkdir -p "${CONFIG_DIR}"
-    assertSuccess "Config directory:" "\n${CONFIG_DIR}\n"
+    assertSuccess "Config directory:" "${CONFIG_DIR}\n"
   fi
 
   assertTask 'Awaiting user input for config filename...'
@@ -377,7 +377,7 @@ createConfigFile() {
   assertTask 'Saving new config file...'
   if [[ -f ${confFile} ]]; then
     configFound=true
-    assertSuccess "Config file:" "\n${confFile/#$HOME/\~}\n"
+    assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
   else
     assertError 'Config file not found!'
     exit 1
@@ -407,7 +407,7 @@ selectConfigFile() {
       " --header-lines 2
     )
 
-    assertSuccess "Config file:" "\n${confFile/#$HOME/\~}\n"
+    assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
 
     if [[ ${isCustom} == Yes ]]; then
       assertTask 'Finding local playlist index...'
@@ -426,13 +426,13 @@ selectSeries() {
     seriesTitle=$(awk -F '\t' '{print $2}' <<<"${series}")
     seriesURL=$(sed "${seriesIndex}q;d" <<<"${seriesList}")
     assertSuccess "Series: ${seriesTitle}"
-    assertSuccess "URL:" "\n${seriesURL}\n"
+    assertSuccess "URL:" "${seriesURL}"
   else
     assertError 'No title selected'
     handleSeriesError=$(
       assertSelection '
-        Select another series
-        Select another season
+        Select different series
+        Select different season
         Abort
     ' --phony
     )
@@ -481,6 +481,35 @@ createSeriesList() {
   fi
 }
 
+addToWatchList() {
+  listJson="${CONFIG_DIR}/list.json"
+  if ! grep -q "${seriesTitle}" "${listJson}"; then
+    confirmAddToWatchList=$(
+      assertSelection '
+      Do you want to add this series to watching list?
+      Yes
+      No
+    ' --header-lines 1
+    )
+
+    if [[ ${confirmAddToWatchList} == Yes ]]; then
+      [[ -s $listJson ]] || echo '{ "watching": [] }' >"${listJson}"
+      list="$(cat "${listJson}")"
+
+      jq --arg url "${seriesURL}" --arg title "${seriesTitle}" \
+        '.watching += [{ $url, $title }]' <<<"${list}" >"${listJson}"
+
+      assertSuccess "Series added to watching list\n"
+    else
+      echo
+      return
+    fi
+
+  else
+    assertSuccess "Series is in watching list\n"
+  fi
+}
+
 selectSeason() {
   assertTask 'Awaiting user selection from seasons list...'
   season=$(
@@ -496,6 +525,7 @@ selectSeason() {
     createSeriesList
     assertTask 'Awaiting user selection from titles list...'
     selectSeries
+    addToWatchList
   else
     assertError 'Failed to prase season'
     exit 1
@@ -561,7 +591,7 @@ stream() {
     assertTask 'Creating MPV config templates...'
     mkdir -p ~/.config/mpv
     cp -r /usr/local/share/doc/mpv/ ~/.config/mpv/
-    assertSuccess "MPV config file:" "\n${mpvConf/#$HOME/\~}\n"
+    assertSuccess "MPV config file:" "${mpvConf/#$HOME/\~}\n"
   fi
 
   if ! grep -q '\[crunchyroll\]' "${mpvConf}"; then
