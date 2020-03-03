@@ -722,7 +722,7 @@ main=$(
   assertSelection "
     ${browsingList}
     Process Configurations ${yellowBoldText}ONLY${reset}
-  " --phony
+  "
 )
 
 if [[ ! ${main} ]]; then
