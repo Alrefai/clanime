@@ -3,6 +3,7 @@
 set -o pipefail
 
 CONFIG_DIR="${HOME}/.config/clanime"
+LIST_JSON="${CONFIG_DIR}/list.json"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
@@ -161,7 +162,7 @@ selectPlaylistIndex() {
     assertTryAgain selectPlaylistIndex
   fi
 
-  assertSuccess "Playlist index file:" "\n${playlistIndex/#$HOME/\~}\n"
+  assertSuccess "Playlist index file:" "${playlistIndex/#$HOME/\~}\n"
 }
 
 playlistSelection() {
@@ -238,7 +239,7 @@ parsePlaylistIndex() {
   playlistFilter
   playlistIndexDIR="${CONFIG_DIR}/playlist-index"
   playlistIndex="${playlistIndexDIR}/$(date '+%Y-%m-%d') - ${seriesTitle}.txt"
-  assertSuccess "Cache file:" "\n${playlistIndex/#$HOME/\~}"
+  assertSuccess "Cache file:" "${playlistIndex/#$HOME/\~}"
   assertSuccess 'Data output: INDEX | SEASON_NUMBER | TITLE'
 
   if youtube-dl "${seriesURL}" \
@@ -355,7 +356,7 @@ getConfigFilename() {
 
   if [[ ${confirmConfFile} == Yes* ]]; then
     confFile="${CONFIG_DIR}/${confFilename}"
-    assertSuccess "Config filename:" "\n${confFilename}\n"
+    assertSuccess "Config filename:" "${confFilename}\n"
   else
     getConfigFilename
   fi
@@ -365,7 +366,7 @@ createConfigFile() {
   if [[ ! -d ${CONFIG_DIR} ]]; then
     assertTask "Creating 'config' directory..."
     mkdir -p "${CONFIG_DIR}"
-    assertSuccess "Config directory:" "\n${CONFIG_DIR}\n"
+    assertSuccess "Config directory:" "${CONFIG_DIR}\n"
   fi
 
   assertTask 'Awaiting user input for config filename...'
@@ -377,7 +378,7 @@ createConfigFile() {
   assertTask 'Saving new config file...'
   if [[ -f ${confFile} ]]; then
     configFound=true
-    assertSuccess "Config file:" "\n${confFile/#$HOME/\~}\n"
+    assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
   else
     assertError 'Config file not found!'
     exit 1
@@ -407,7 +408,7 @@ selectConfigFile() {
       " --header-lines 2
     )
 
-    assertSuccess "Config file:" "\n${confFile/#$HOME/\~}\n"
+    assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
 
     if [[ ${isCustom} == Yes ]]; then
       assertTask 'Finding local playlist index...'
@@ -426,13 +427,13 @@ selectSeries() {
     seriesTitle=$(awk -F '\t' '{print $2}' <<<"${series}")
     seriesURL=$(sed "${seriesIndex}q;d" <<<"${seriesList}")
     assertSuccess "Series: ${seriesTitle}"
-    assertSuccess "URL:" "\n${seriesURL}\n"
+    assertSuccess "URL:" "${seriesURL}"
   else
     assertError 'No title selected'
     handleSeriesError=$(
       assertSelection '
-        Select another series
-        Select another season
+        Select different series
+        Select different season
         Abort
     ' --phony
     )
@@ -481,6 +482,34 @@ createSeriesList() {
   fi
 }
 
+addToWatchList() {
+  if ! grep -q "${seriesTitle}" "${LIST_JSON}" 2>/dev/null; then
+    confirmAddToWatchList=$(
+      assertSelection '
+      Do you want to add this series to watching list?
+      Yes
+      No
+    ' --header-lines 1
+    )
+
+    if [[ ${confirmAddToWatchList} == Yes ]]; then
+      [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
+      list="$(cat "${LIST_JSON}")"
+
+      jq --arg url "${seriesURL}" --arg title "${seriesTitle}" \
+        '.watching += [{ $url, $title }]' <<<"${list}" >"${LIST_JSON}"
+
+      assertSuccess "Series added to watching list\n"
+    else
+      echo
+      return
+    fi
+
+  else
+    assertSuccess "Series is in watching list\n"
+  fi
+}
+
 selectSeason() {
   assertTask 'Awaiting user selection from seasons list...'
   season=$(
@@ -496,6 +525,7 @@ selectSeason() {
     createSeriesList
     assertTask 'Awaiting user selection from titles list...'
     selectSeries
+    addToWatchList
   else
     assertError 'Failed to prase season'
     exit 1
@@ -514,6 +544,11 @@ fetchSeasons() {
 }
 
 findConfig() {
+  if [[ ! ${seriesTitle} ]]; then
+    assertError 'No series selected'
+    exit 1
+  fi
+
   assertTask 'Finding custom config file for this series...'
   if compgen -G "${CONFIG_DIR}/${seriesTitle}*" >/dev/null; then
     assertSuccess "Found one or more youtube-dl config files for this series\n"
@@ -561,7 +596,7 @@ stream() {
     assertTask 'Creating MPV config templates...'
     mkdir -p ~/.config/mpv
     cp -r /usr/local/share/doc/mpv/ ~/.config/mpv/
-    assertSuccess "MPV config file:" "\n${mpvConf/#$HOME/\~}\n"
+    assertSuccess "MPV config file:" "${mpvConf/#$HOME/\~}\n"
   fi
 
   if ! grep -q '\[crunchyroll\]' "${mpvConf}"; then
@@ -627,30 +662,74 @@ processStream() {
   fi
 }
 
+selectFromWatchList() {
+  list="$(cat "${LIST_JSON}")"
+
+  seriesTitle="$(
+    jq -cr '.watching[].title' <<<"${list}" | fzf
+  )"
+
+  seriesURL="$(
+    jq --arg title "${seriesTitle}" -cr \
+      '.watching[] | select(.title==$title).url' <<<"${list}"
+  )"
+
+  if [[ ${seriesTitle} && ${seriesURL} ]]; then
+    assertSuccess "Series: ${seriesTitle}"
+    assertSuccess "URL:" "${seriesURL}\n"
+  else
+    assertTryAgain selectFromWatchList
+  fi
+}
+
+browse() {
+  if [[ $1 == "Watching" ]]; then
+    assertTask 'Awaiting user selection from watching list...'
+    selectFromWatchList
+  elif [[ $1 == "Seasons" ]]; then
+    assertTask 'Fetching series seasons list from crunchyroll.com...'
+    fetchSeasons
+  fi
+
+  findConfig
+}
+
 if [[ $1 =~ ^((--)?help|-h)$ ]]; then
   mpv --help
   exit
 fi
 
-assertTask 'Fetching series seasons list from crunchyroll.com...'
-fetchSeasons
-findConfig
+browsingList="
+  $([[ -s $LIST_JSON ]] && echo "Watching List")
+  Seasons List
+"
 
 main=$(
   assertSelection "
-    Stream
-    Process configurations ${yellowBoldText}ONLY${reset}
+    ${browsingList}
+    Process Configurations ${yellowBoldText}ONLY${reset}
   " --phony
 )
 
-if [[ ${main} == Stream* ]]; then
+if [[ ! ${main} ]]; then
+  exit 1
+elif [[ ${main} != Process* ]]; then
+  browse "$(awk '{print $1}' <<<"${main}")"
   processStream "$@"
+
 else
+  browse "$(
+    assertSelection "
+      Process configurations of a series from...
+      ${browsingList}
+    " --header-lines 1 | awk '{print $1}'
+  )"
+
   while true; do
     processConfig
     repeat=$(
       assertSelection '
-        Process another config file this series
+        Process another config file for selected series
         Cancel
       ' --phony
     )
