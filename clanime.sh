@@ -3,6 +3,7 @@
 set -o pipefail
 
 CONFIG_DIR="${HOME}/.config/clanime"
+LIST_JSON="${CONFIG_DIR}/list.json"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
@@ -482,8 +483,7 @@ createSeriesList() {
 }
 
 addToWatchList() {
-  listJson="${CONFIG_DIR}/list.json"
-  if ! grep -q "${seriesTitle}" "${listJson}"; then
+  if ! grep -q "${seriesTitle}" "${LIST_JSON}"; then
     confirmAddToWatchList=$(
       assertSelection '
       Do you want to add this series to watching list?
@@ -493,11 +493,11 @@ addToWatchList() {
     )
 
     if [[ ${confirmAddToWatchList} == Yes ]]; then
-      [[ -s $listJson ]] || echo '{ "watching": [] }' >"${listJson}"
-      list="$(cat "${listJson}")"
+      [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
+      list="$(cat "${LIST_JSON}")"
 
       jq --arg url "${seriesURL}" --arg title "${seriesTitle}" \
-        '.watching += [{ $url, $title }]' <<<"${list}" >"${listJson}"
+        '.watching += [{ $url, $title }]' <<<"${list}" >"${LIST_JSON}"
 
       assertSuccess "Series added to watching list\n"
     else
@@ -544,6 +544,11 @@ fetchSeasons() {
 }
 
 findConfig() {
+  if [[ ! ${seriesTitle} ]]; then
+    assertError 'No series selected'
+    exit 1
+  fi
+
   assertTask 'Finding custom config file for this series...'
   if compgen -G "${CONFIG_DIR}/${seriesTitle}*" >/dev/null; then
     assertSuccess "Found one or more youtube-dl config files for this series\n"
@@ -657,9 +662,35 @@ processStream() {
   fi
 }
 
+selectFromWatchList() {
+  list="$(cat "${LIST_JSON}")"
+
+  seriesTitle="$(
+    jq -cr '.watching[].title' <<<"${list}" | fzf
+  )"
+
+  seriesURL="$(
+    jq --arg title "${seriesTitle}" -cr \
+      '.watching[] | select(.title==$title).url' <<<"${list}"
+  )"
+
+  if [[ ${seriesTitle} && ${seriesURL} ]]; then
+    assertSuccess "Series: ${seriesTitle}"
+    assertSuccess "URL:" "${seriesURL}\n"
+  else
+    assertTryAgain selectFromWatchList
+  fi
+}
+
 browse() {
-  assertTask 'Fetching series seasons list from crunchyroll.com...'
-  fetchSeasons
+  if [[ $1 == "Watching" ]]; then
+    assertTask 'Awaiting user selection from watching list...'
+    selectFromWatchList
+  elif [[ $1 == "Seasons" ]]; then
+    assertTask 'Fetching series seasons list from crunchyroll.com...'
+    fetchSeasons
+  fi
+
   findConfig
 }
 
@@ -668,23 +699,37 @@ if [[ $1 =~ ^((--)?help|-h)$ ]]; then
   exit
 fi
 
+browsingList="
+  $([[ -s $LIST_JSON ]] && echo "Watching List")
+  Seasons List
+"
+
 main=$(
   assertSelection "
-    Seasons List
+    ${browsingList}
     Process Configurations ${yellowBoldText}ONLY${reset}
   " --phony
 )
 
-if [[ ${main} != Process* ]]; then
-  browse
+if [[ ! ${main} ]]; then
+  exit 1
+elif [[ ${main} != Process* ]]; then
+  browse "$(awk '{print $1}' <<<"${main}")"
   processStream "$@"
+
 else
-  browse
+  browse "$(
+    assertSelection "
+      Process configurations of a series from...
+      ${browsingList}
+    " --header-lines 1 | awk '{print $1}'
+  )"
+
   while true; do
     processConfig
     repeat=$(
       assertSelection '
-        Process another config file this series
+        Process another config file for selected series
         Cancel
       ' --phony
     )
