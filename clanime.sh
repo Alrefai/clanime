@@ -720,6 +720,7 @@ browsingList="
   Seasons List
 "
 
+assertTask "Awaiting user selection from main options..."
 main=$(
   assertSelection "
     ${browsingList}
@@ -730,16 +731,20 @@ main=$(
 if [[ ! ${main} ]]; then
   exit 1
 elif [[ ${main} != Process* ]]; then
+  assertSuccess "Browse: ${main}\n"
   browse "$(awk '{print $1}' <<<"${main}")"
   processStream "$@"
 
 else
-  browse "$(
+  processOption="$(
     assertSelection "
       Process configurations of a series from...
       ${browsingList}
-    " --header-lines 1 | awk '{print $1}'
+    " --header-lines 1
   )"
+
+  assertSuccess "Process series config from: ${processOption}\n"
+  browse "$(awk '{print $1}' <<<"${processOption}")"
 
   while true; do
     processConfig
