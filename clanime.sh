@@ -7,7 +7,6 @@ LIST_JSON="${CONFIG_DIR}/list.json"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
-seasonBaseURL="${mainURL}/seasons"
 
 seasonQuery='[href^="#/videos/anime/seasons/"]::attr(title)'
 playlistQuery='a.portrait-element::attr(href)'
@@ -450,8 +449,7 @@ selectSeries() {
 }
 
 createSeriesList() {
-  seasonURL="${seasonBaseURL}/${season}"
-  playlistHtmlDoc=$(downloadPage "${seasonURL}")
+  playlistHtmlDoc=$(downloadPage "${seriesListURL}")
 
   seriesList=$(
     hxclean <<<"${playlistHtmlDoc}" |
@@ -513,34 +511,38 @@ addToWatchList() {
 selectSeason() {
   assertTask 'Awaiting user selection from seasons list...'
   season=$(
-    hxclean <<<"${seasonsHtmlDoc}" |
+    hxclean <<<"${mainHtmlDoc}" |
       hxselect -s '\n' -c "${seasonQuery}" 2>/dev/null |
       awk '{print tolower($1"-"$2)}' |
       fzf
   )
 
   if [[ ${season} ]]; then
+    seriesListURL="${seriesListBaseURL}/${season}"
     assertSuccess "Season: ${season^}\n"
-    assertTask 'Creating series list...'
-    createSeriesList
-    assertTask 'Awaiting user selection from titles list...'
-    selectSeries
-    addToWatchList
   else
     assertError 'Failed to prase season'
     exit 1
   fi
 }
 
-fetchSeasons() {
-  seasonsHtmlDoc=$(
+processSeries() {
+  seriesListBaseURL="${mainURL}/seasons"
+
+  assertTask 'Downloading HTML document of crunchyroll.com anime page...'
+  mainHtmlDoc=$(
     downloadPage ${mainURL} || assertError 'Failed to download HTML document'
   )
 
-  [[ ${seasonsHtmlDoc} ]] || exit 1
+  [[ ${mainHtmlDoc} ]] || exit 1
+  assertSuccess "HTML document downloaded\n"
 
-  assertSuccess "Downloaded HTML document of seasons list\n"
   selectSeason
+  assertTask 'Creating series list...'
+  createSeriesList
+  assertTask 'Awaiting user selection from titles list...'
+  selectSeries
+  addToWatchList
 }
 
 findConfig() {
@@ -686,9 +688,8 @@ browse() {
   if [[ $1 == "Watching" ]]; then
     assertTask 'Awaiting user selection from watching list...'
     selectFromWatchList
-  elif [[ $1 == "Seasons" ]]; then
-    assertTask 'Fetching series seasons list from crunchyroll.com...'
-    fetchSeasons
+  else
+    processSeries
   fi
 
   findConfig
