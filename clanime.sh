@@ -7,7 +7,6 @@ LIST_JSON="${CONFIG_DIR}/list.json"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
-seasonBaseURL="${mainURL}/seasons"
 
 seasonQuery='[href^="#/videos/anime/seasons/"]::attr(title)'
 playlistQuery='a.portrait-element::attr(href)'
@@ -431,17 +430,19 @@ selectSeries() {
   else
     assertError 'No title selected'
     handleSeriesError=$(
-      assertSelection '
-        Select different series
-        Select different season
+      assertSelection "
+        Try again
+        $([[ $1 == Seasons ]] && echo 'Select different season')
         Abort
-    ' --phony
+    " --phony
     )
 
-    if [[ ${handleSeriesError} == *series ]]; then
-      selectSeries
+    if [[ ${handleSeriesError} == Try* ]]; then
+      selectSeries "$1"
     elif [[ ${handleSeriesError} == *season ]]; then
+      echo
       selectSeason
+      processSeriesList "$1"
     else
       assertError 'Aborted by user'
       exit 1
@@ -450,8 +451,7 @@ selectSeries() {
 }
 
 createSeriesList() {
-  seasonURL="${seasonBaseURL}/${season}"
-  playlistHtmlDoc=$(downloadPage "${seasonURL}")
+  playlistHtmlDoc=$(downloadPage "${seriesListURL}")
 
   seriesList=$(
     hxclean <<<"${playlistHtmlDoc}" |
@@ -513,34 +513,46 @@ addToWatchList() {
 selectSeason() {
   assertTask 'Awaiting user selection from seasons list...'
   season=$(
-    hxclean <<<"${seasonsHtmlDoc}" |
+    hxclean <<<"${mainHtmlDoc}" |
       hxselect -s '\n' -c "${seasonQuery}" 2>/dev/null |
       awk '{print tolower($1"-"$2)}' |
       fzf
   )
 
   if [[ ${season} ]]; then
+    seriesListURL="${seriesListBaseURL}/${season}"
     assertSuccess "Season: ${season^}\n"
-    assertTask 'Creating series list...'
-    createSeriesList
-    assertTask 'Awaiting user selection from titles list...'
-    selectSeries
-    addToWatchList
   else
     assertError 'Failed to prase season'
     exit 1
   fi
 }
 
-fetchSeasons() {
-  seasonsHtmlDoc=$(
-    downloadPage ${mainURL} || assertError 'Failed to download HTML document'
-  )
+processSeriesList() {
+  assertTask 'Creating series list...'
+  createSeriesList
+  assertTask 'Awaiting user selection from titles list...'
+  selectSeries "$1"
+}
 
-  [[ ${seasonsHtmlDoc} ]] || exit 1
+processSeriesOptions() {
+  seriesListBaseURL="${mainURL}/${1,,}"
+  assertTask "Fetching ${1,,} list from crunchyroll.com..."
 
-  assertSuccess "Downloaded HTML document of seasons list\n"
-  selectSeason
+  if [[ $1 == Seasons ]]; then
+    mainHtmlDoc=$(
+      downloadPage ${mainURL} || assertError 'Failed to download HTML document'
+    )
+
+    [[ ${mainHtmlDoc} ]] || exit 1
+    selectSeason
+
+  else
+    seriesListURL="${seriesListBaseURL}"
+  fi
+
+  processSeriesList "$1"
+  addToWatchList
 }
 
 findConfig() {
@@ -686,9 +698,8 @@ browse() {
   if [[ $1 == "Watching" ]]; then
     assertTask 'Awaiting user selection from watching list...'
     selectFromWatchList
-  elif [[ $1 == "Seasons" ]]; then
-    assertTask 'Fetching series seasons list from crunchyroll.com...'
-    fetchSeasons
+  else
+    processSeriesOptions "$1"
   fi
 
   findConfig
@@ -701,6 +712,9 @@ fi
 
 browsingList="
   $([[ -s $LIST_JSON ]] && echo "Watching List")
+  Popular List
+  Simulcasts List
+  Updated List
   Seasons List
 "
 
@@ -708,7 +722,7 @@ main=$(
   assertSelection "
     ${browsingList}
     Process Configurations ${yellowBoldText}ONLY${reset}
-  " --phony
+  "
 )
 
 if [[ ! ${main} ]]; then
