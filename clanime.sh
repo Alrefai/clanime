@@ -483,7 +483,7 @@ createSeriesList() {
 }
 
 addToWatchList() {
-  if ! grep -q "${seriesTitle}" "${LIST_JSON}"; then
+  if ! grep -q "${seriesTitle}" "${LIST_JSON}" 2>/dev/null; then
     confirmAddToWatchList=$(
       assertSelection '
       Do you want to add this series to watching list?
