@@ -689,7 +689,9 @@ selectFromWatchList() {
 }
 
 browse() {
-  if [[ $1 == "Watching" ]]; then
+  if [[ ! $1 ]]; then
+    exit 1
+  elif [[ $1 == "Watching" ]]; then
     assertTask 'Awaiting user selection from watching list...'
     selectFromWatchList
   else
