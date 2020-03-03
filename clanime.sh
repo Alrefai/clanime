@@ -430,17 +430,19 @@ selectSeries() {
   else
     assertError 'No title selected'
     handleSeriesError=$(
-      assertSelection '
-        Select different series
-        Select different season
+      assertSelection "
+        Try again
+        $([[ $1 == Seasons ]] && echo 'Select different season')
         Abort
-    ' --phony
+    " --phony
     )
 
-    if [[ ${handleSeriesError} == *series ]]; then
-      selectSeries
+    if [[ ${handleSeriesError} == Try* ]]; then
+      selectSeries "$1"
     elif [[ ${handleSeriesError} == *season ]]; then
+      echo
       selectSeason
+      processSeriesList "$1"
     else
       assertError 'Aborted by user'
       exit 1
@@ -526,22 +528,30 @@ selectSeason() {
   fi
 }
 
-processSeries() {
-  seriesListBaseURL="${mainURL}/seasons"
-
-  assertTask 'Downloading HTML document of crunchyroll.com anime page...'
-  mainHtmlDoc=$(
-    downloadPage ${mainURL} || assertError 'Failed to download HTML document'
-  )
-
-  [[ ${mainHtmlDoc} ]] || exit 1
-  assertSuccess "HTML document downloaded\n"
-
-  selectSeason
+processSeriesList() {
   assertTask 'Creating series list...'
   createSeriesList
   assertTask 'Awaiting user selection from titles list...'
-  selectSeries
+  selectSeries "$1"
+}
+
+processSeriesOptions() {
+  seriesListBaseURL="${mainURL}/${1,,}"
+  assertTask "Fetching ${1,,} list from crunchyroll.com..."
+
+  if [[ $1 == Seasons ]]; then
+    mainHtmlDoc=$(
+      downloadPage ${mainURL} || assertError 'Failed to download HTML document'
+    )
+
+    [[ ${mainHtmlDoc} ]] || exit 1
+    selectSeason
+
+  else
+    seriesListURL="${seriesListBaseURL}"
+  fi
+
+  processSeriesList "$1"
   addToWatchList
 }
 
@@ -689,7 +699,7 @@ browse() {
     assertTask 'Awaiting user selection from watching list...'
     selectFromWatchList
   else
-    processSeries
+    processSeriesOptions "$1"
   fi
 
   findConfig
@@ -702,6 +712,9 @@ fi
 
 browsingList="
   $([[ -s $LIST_JSON ]] && echo "Watching List")
+  Popular List
+  Simulcasts List
+  Updated List
   Seasons List
 "
 
