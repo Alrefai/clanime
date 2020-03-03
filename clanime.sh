@@ -362,12 +362,6 @@ getConfigFilename() {
 }
 
 createConfigFile() {
-  if [[ ! -d ${CONFIG_DIR} ]]; then
-    assertTask "Creating 'config' directory..."
-    mkdir -p "${CONFIG_DIR}"
-    assertSuccess "Config directory:" "${CONFIG_DIR}\n"
-  fi
-
   assertTask 'Awaiting user input for config filename...'
   getConfigFilename
 
@@ -708,6 +702,12 @@ browse() {
 if [[ $1 =~ ^((--)?help|-h)$ ]]; then
   mpv --help
   exit
+fi
+
+if [[ ! -d ${CONFIG_DIR} ]]; then
+  assertTask "Creating 'config' directory..."
+  mkdir -p "${CONFIG_DIR}"
+  assertSuccess "Config directory:" "${CONFIG_DIR}\n"
 fi
 
 browsingList="
