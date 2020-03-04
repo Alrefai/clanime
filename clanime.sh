@@ -211,8 +211,8 @@ playlistFilter() {
   filter=$(
     assertSelection '
       Select format filter
-      Japanese audio (softsub only)
-      English audio (softsub only)
+      Japanese audio (RAW)
+      English audio (RAW)
       Custome filter
       No filter
     ' --header-lines 1
