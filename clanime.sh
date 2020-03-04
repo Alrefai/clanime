@@ -249,7 +249,7 @@ parsePlaylistIndex() {
     --format "${format:-best}" |
     jq --unbuffered -cr \
       '[.playlist_index,.season_number,.title] | join(" | ")' |
-    tee "${playlistIndex}"; then
+    tee "${playlistIndex}" || [[ $? == 1 ]] && [[ -s ${playlistIndex} ]]; then
 
     assertSuccess "Parsing completed\n"
   else
