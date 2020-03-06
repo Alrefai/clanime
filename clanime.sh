@@ -5,6 +5,7 @@ set -o pipefail
 CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
 CONFIG_DIR=${CONFIG_HOME}/clanime
 USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
+CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
 
 baseURL='https://www.crunchyroll.com'
@@ -673,12 +674,14 @@ download() {
   if [[ ${confFile} ]]; then
     assertTask 'Downloading with custom youtube-dl config file...'
     youtube-dl "${seriesURL}" --netrc --config-location <(
-      cat "${USER_CONFIG}" "${confFile}" 2>/dev/null
+      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" 2>/dev/null
     ) "$@"
 
   else
     assertTask 'Downloading with youtube-dl...'
-    youtube-dl "${seriesURL}" --netrc "$@"
+    youtube-dl "${seriesURL}" --netrc --config-location <(
+      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
+    ) "$@"
   fi
 }
 
