@@ -659,13 +659,40 @@ stream() {
 }
 
 processStream() {
-  processConfig
   if [[ ${confFile} ]]; then
     assertTask 'Streaming with custom youtube-dl config file...'
     stream --ytdl-raw-options=config-location="${confFile}" "$@"
   else
     assertTask 'Streaming with Crunchyroll profile in mpv config file...'
     stream "$@"
+  fi
+}
+
+download() {
+  if [[ ${confFile} ]]; then
+    assertTask 'Downloading with custom youtube-dl config file...'
+    youtube-dl "${seriesURL}" --netrc --config-location "${confFile}" "$@"
+
+  else
+    assertTask 'Downloading with youtube-dl...'
+    youtube-dl "${seriesURL}" --netrc "$@"
+  fi
+}
+
+downloadOrStream() {
+  streamOrDownload=$(
+    assertSelection "
+      Stream
+      Download
+    " --phony
+  )
+
+  if [[ ${streamOrDownload} == Stream ]]; then
+    processStream "$@"
+  elif [[ ${streamOrDownload} == Download ]]; then
+    download "$@"
+  else
+    assertTryAgain downloadOrStream "$@"
   fi
 }
 
@@ -734,7 +761,8 @@ if [[ ! ${main} ]]; then
 elif [[ ${main} != Process* ]]; then
   assertSuccess "Browse: ${main}\n"
   browse "$(awk '{print $1}' <<<"${main}")"
-  processStream "$@"
+  processConfig
+  downloadOrStream "$@"
 
 else
   processOption="$(
