@@ -2,7 +2,8 @@
 
 set -o pipefail
 
-CONFIG_DIR="${HOME}/.config/clanime"
+CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
+CONFIG_DIR=${CONFIG_HOME}/clanime
 LIST_JSON="${CONFIG_DIR}/list.json"
 
 baseURL='https://www.crunchyroll.com'
