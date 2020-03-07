@@ -8,6 +8,7 @@ USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
 SERIES_DIR="${SERIES_DIR:-1}"
+ANIME_DIR="${ANIME_DIR}"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
@@ -672,15 +673,23 @@ processStream() {
 }
 
 download() {
-  if [[ ! ${SERIES_DIR} == 0 ]]; then
+  if [[ ${ANIME_DIR} || ! ${SERIES_DIR} == 0 ]]; then
     assertTask 'Changing directory...'
-    [[ -d ${seriesTitle} ]] || mkdir "${seriesTitle}"
-    if cd "${seriesTitle}"; then
-      assertSuccess "Download directory: ${seriesTitle}\n"
-    else
-      assertError 'Could not change directory'
+
+    [[ ${ANIME_DIR} ]] && if ! cd "${ANIME_DIR}"; then
+      assertError 'Could not change to Anime home directory'
       exit 1
     fi
+
+    if [[ ! ${SERIES_DIR} == 0 ]]; then
+      [[ -d ${seriesTitle} ]] || mkdir "${seriesTitle}"
+      if ! cd "${seriesTitle}"; then
+        assertError 'Could not change to series directory'
+        exit 1
+      fi
+    fi
+
+    assertSuccess 'Download directory:' "${PWD/#$HOME/\~}\n"
   fi
 
   if [[ ${confFile} ]]; then
@@ -750,6 +759,12 @@ browse() {
 if [[ $1 =~ ^((--)?help|-h)$ ]]; then
   mpv --help
   exit
+fi
+
+[[ ${ANIME_DIR} ]] && if [[ ! -d ${ANIME_DIR} ]]; then
+  assertMissing 'Anime home directory:' "${ANIME_DIR}"
+  assertError 'Anime home directory not found'
+  exit 1
 fi
 
 if [[ ! -d ${CONFIG_DIR} ]]; then
