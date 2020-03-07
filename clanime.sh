@@ -7,6 +7,7 @@ CONFIG_DIR=${CONFIG_HOME}/clanime
 USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
+SERIES_DIR="${SERIES_DIR:-1}"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
@@ -671,6 +672,17 @@ processStream() {
 }
 
 download() {
+  if [[ ! ${SERIES_DIR} == 0 ]]; then
+    assertTask 'Changing directory...'
+    [[ -d ${seriesTitle} ]] || mkdir "${seriesTitle}"
+    if cd "${seriesTitle}"; then
+      assertSuccess "Download directory: ${seriesTitle}\n"
+    else
+      assertError 'Could not change directory'
+      exit 1
+    fi
+  fi
+
   if [[ ${confFile} ]]; then
     assertTask 'Downloading with custom youtube-dl config file...'
     youtube-dl "${seriesURL}" --netrc --config-location <(
