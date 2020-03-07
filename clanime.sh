@@ -2,8 +2,13 @@
 
 set -o pipefail
 
-CONFIG_DIR="${HOME}/.config/clanime"
+CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
+CONFIG_DIR=${CONFIG_HOME}/clanime
+USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
+CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
+SERIES_DIR="${SERIES_DIR:-1}"
+ANIME_DIR="${ANIME_DIR}"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
@@ -658,13 +663,63 @@ stream() {
 }
 
 processStream() {
-  processConfig
   if [[ ${confFile} ]]; then
     assertTask 'Streaming with custom youtube-dl config file...'
     stream --ytdl-raw-options=config-location="${confFile}" "$@"
   else
     assertTask 'Streaming with Crunchyroll profile in mpv config file...'
     stream "$@"
+  fi
+}
+
+download() {
+  if [[ ${ANIME_DIR} || ! ${SERIES_DIR} == 0 ]]; then
+    assertTask 'Changing directory...'
+
+    [[ ${ANIME_DIR} ]] && if ! cd "${ANIME_DIR}"; then
+      assertError 'Could not change to Anime home directory'
+      exit 1
+    fi
+
+    if [[ ! ${SERIES_DIR} == 0 ]]; then
+      [[ -d ${seriesTitle} ]] || mkdir "${seriesTitle}"
+      if ! cd "${seriesTitle}"; then
+        assertError 'Could not change to series directory'
+        exit 1
+      fi
+    fi
+
+    assertSuccess 'Download directory:' "${PWD/#$HOME/\~}\n"
+  fi
+
+  if [[ ${confFile} ]]; then
+    assertTask 'Downloading with custom youtube-dl config file...'
+    youtube-dl "${seriesURL}" --config-location <(
+      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" 2>/dev/null
+    ) "$@"
+
+  else
+    assertTask 'Downloading with youtube-dl...'
+    youtube-dl "${seriesURL}" --config-location <(
+      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
+    ) "$@"
+  fi
+}
+
+downloadOrStream() {
+  streamOrDownload=$(
+    assertSelection "
+      Stream
+      Download
+    " --phony
+  )
+
+  if [[ ${streamOrDownload} == Stream ]]; then
+    processStream "$@"
+  elif [[ ${streamOrDownload} == Download ]]; then
+    download "$@"
+  else
+    assertTryAgain downloadOrStream "$@"
   fi
 }
 
@@ -706,6 +761,12 @@ if [[ $1 =~ ^((--)?help|-h)$ ]]; then
   exit
 fi
 
+[[ ${ANIME_DIR} ]] && if [[ ! -d ${ANIME_DIR} ]]; then
+  assertMissing 'Anime home directory:' "${ANIME_DIR}"
+  assertError 'Anime home directory not found'
+  exit 1
+fi
+
 if [[ ! -d ${CONFIG_DIR} ]]; then
   assertTask "Creating 'config' directory..."
   mkdir -p "${CONFIG_DIR}"
@@ -733,7 +794,8 @@ if [[ ! ${main} ]]; then
 elif [[ ${main} != Process* ]]; then
   assertSuccess "Browse: ${main}\n"
   browse "$(awk '{print $1}' <<<"${main}")"
-  processStream "$@"
+  processConfig
+  downloadOrStream "$@"
 
 else
   processOption="$(
