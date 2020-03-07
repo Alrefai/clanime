@@ -694,13 +694,13 @@ download() {
 
   if [[ ${confFile} ]]; then
     assertTask 'Downloading with custom youtube-dl config file...'
-    youtube-dl "${seriesURL}" --netrc --config-location <(
+    youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" 2>/dev/null
     ) "$@"
 
   else
     assertTask 'Downloading with youtube-dl...'
-    youtube-dl "${seriesURL}" --netrc --config-location <(
+    youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
     ) "$@"
   fi
