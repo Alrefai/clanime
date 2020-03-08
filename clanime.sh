@@ -247,9 +247,10 @@ parsePlaylistIndex() {
   assertSuccess 'Data output: INDEX | SEASON_NUMBER | TITLE'
 
   if youtube-dl "${seriesURL}" \
-    --netrc \
+    --config-location <(
+      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
+    ) \
     --dump-json \
-    --ignore-config \
     --ignore-errors \
     --format "${format:-best}" |
     jq --unbuffered -cr \
