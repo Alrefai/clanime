@@ -9,6 +9,7 @@ CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
 SERIES_DIR="${SERIES_DIR:-1}"
 ANIME_DIR="${ANIME_DIR}"
+PARSE_INDEX_START="${PARSE_INDEX_START:-1}"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
@@ -252,6 +253,7 @@ parsePlaylistIndex() {
     ) \
     --dump-json \
     --ignore-errors \
+    --playlist-start "${PARSE_INDEX_START}" \
     --format "${format:-best}" |
     jq --unbuffered -cr \
       '[.playlist_index,.season_number,.title] | join(" | ")' |
