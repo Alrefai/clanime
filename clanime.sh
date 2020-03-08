@@ -10,6 +10,7 @@ LIST_JSON="${CONFIG_DIR}/list.json"
 SERIES_DIR="${SERIES_DIR:-1}"
 ANIME_DIR="${ANIME_DIR}"
 PARSE_INDEX_START="${PARSE_INDEX_START:-1}"
+FORMAT_FILTER="${FORMAT_FILTER:-[format_id*=jaJP][format_id!*=hardsub]}"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
@@ -231,7 +232,7 @@ playlistFilter() {
   elif [[ ${filter} == Custome* ]]; then
     assertTask 'Awaiting user input for format filter...'
     readHeader 'Modify format template below (then press [ENTER])'
-    readPrompt '' '[format_id*=jaJP][format_id!*=hardsub]'
+    readPrompt '' "${FORMAT_FILTER}"
     format=${textInput}
   fi
 
