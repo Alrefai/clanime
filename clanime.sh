@@ -237,20 +237,32 @@ playlistFilter() {
       readHeader 'Modify format template below (then press [ENTER])'
       readPrompt '' "${FORMAT_FILTER}"
       format=${textInput}
+    else
+      format='best'
+      assertSuccess 'Format:' "Default to 'best'"
+      return
     fi
 
-    assertSuccess "Format: ${format:-Default to 'best'}"
+    assertSuccess 'Format:' "${format}"
   fi
 }
 
 parsePlaylistIndex() {
   [[ -d ${CONFIG_DIR}/playlist-index ]] ||
     mkdir -p "${CONFIG_DIR}/playlist-index"
-  playlistFilter
+
+  if [[ ${format} == best ]]; then
+    assertSuccess 'Format:' "Default to 'best'"
+  elif [[ ${format} ]]; then
+    assertSuccess 'Format:' "${format}"
+  else
+    playlistFilter
+  fi
+
   playlistIndexDIR="${CONFIG_DIR}/playlist-index"
   playlistIndex="${playlistIndexDIR}/$(date '+%Y-%m-%d') - ${seriesTitle}.txt"
-  assertSuccess "Cache file:" "${playlistIndex/#$HOME/\~}"
-  assertSuccess 'Data output: INDEX | SEASON_NUMBER | TITLE'
+  assertSuccess 'Cache file:' "${playlistIndex/#$HOME/\~}"
+  assertSuccess 'Data output:' 'INDEX | SEASON_NUMBER | TITLE'
 
   if youtube-dl "${seriesURL}" \
     --config-location <(
@@ -269,6 +281,16 @@ parsePlaylistIndex() {
     assertError 'Failed to parse playlist'
     assertTryAgain parsePlaylistIndex
   fi
+}
+
+ytdlConfOptions() {
+  configOptions=$(
+    assertSelection "
+      Select one or more youtube-dl options
+      --format FORMAT
+      --playlist-(start|end|items) (NUMBER|ITEM_SPEC)
+    " --header-lines 1 -m 2
+  ) || assertTryAgain ytdlConfOptions
 }
 
 customizeConfigFile() {
@@ -292,19 +314,20 @@ customizeConfigFile() {
     return
   fi
 
-  selectRange=$(
-    assertSelection "
-      Do you want to specify --playlist-(start|end|items) options?
-      This is useful for filtering dubbed episodes from playlist stream.
-      Or for creating a config file for each season of the series.
-      $(assertWarning \
-      'youtube-dl may take several minutes to parse long playlists')
-      Yes
-      No
-    " --header-lines 4
-  )
+  ytdlConfOptions
+  if grep -qE '^--format' <<<"${configOptions}"; then
+    assertTask 'Awaiting user selection for format filter...'
+    playlistFilter
+    if [[ ${format} != best ]]; then
+      echo "--format '${format}'" >>"${confFile}"
+      echo
+    else
+      assertSuccess \
+        "No need to add this format to config file. It is used by default!\n"
+    fi
+  fi
 
-  if [[ ${selectRange} == Yes ]]; then
+  if grep -qE '^--playlist' <<<"${configOptions}"; then
     assertTask 'Finding local playlist index...'
     playlistIndexQuery="${CONFIG_DIR}/playlist-index/*${seriesTitle}*"
     if compgen -G "${playlistIndexQuery}" >/dev/null; then
@@ -335,9 +358,6 @@ customizeConfigFile() {
 
     assertTask 'Awaiting user selection for playlist modifiers...'
     playlistSelection
-  else
-    assertMissing "No youtube-dl options added\n"
-    return
   fi
 
   [[ -s ${confFile} ]] && ${EDITOR:-vi} "${confFile}"
