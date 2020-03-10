@@ -463,7 +463,9 @@ selectConfigFile() {
         $(assertSuccess "Config file: '${confFilename}'")
         No
         Yes
-      " --header-lines 2
+      " --header-lines 2 \
+        --preview "cat \"${confFile}\" 2>/dev/null | head -200"
+
     )
 
     if [[ ${isCustom} == Yes ]]; then
