@@ -138,7 +138,7 @@ confirmModifiers() {
     assertSelection "
       Confirm playlist modifiers?
       $(assertSuccess "Playlist modifiers:\n${playlistModifier}")
-      Yes, review config file in default text editor
+      Yes
       No, reselect index numbers
       Abort
     " --header-lines $((modifiersCount + 2))
@@ -146,6 +146,7 @@ confirmModifiers() {
 
   if [[ ${confirmModifiers} == Yes* ]]; then
     assertSuccess "Playlist modifiers:" "\n${playlistModifier}\n"
+    echo "${playlistModifier}" >>"${confFile}"
   elif [[ ${confirmModifiers} == No* ]]; then
     playlistSelection
   else
@@ -268,6 +269,26 @@ parsePlaylistIndex() {
 }
 
 customizeConfigFile() {
+  assertTask 'Customizing config file...'
+  useConfigWizard=$(
+    assertSelection "
+      Use Config Wizard
+      Add youtube-dl options manually
+    "
+  )
+
+  if [[ ${useConfigWizard} != *Wizard ]]; then
+    ${EDITOR:-vi} "${confFile}"
+
+    if [[ -s ${confFile} ]]; then
+      assertSuccess "Customized youtube-dl options manually\n"
+    else
+      assertMissing "No youtube-dl options found!\n"
+    fi
+
+    return
+  fi
+
   selectRange=$(
     assertSelection "
       Do you want to specify --playlist-(start|end|items) options?
@@ -276,11 +297,12 @@ customizeConfigFile() {
       $(assertWarning \
       'youtube-dl may take several minutes to parse long playlists')
       Yes
-      No, add other options to config file manually
+      No
     " --header-lines 4
   )
 
   if [[ ${selectRange} == Yes ]]; then
+    assertTask 'Finding local playlist index...'
     playlistIndexQuery="${CONFIG_DIR}/playlist-index/*${seriesTitle}*"
     if compgen -G "${playlistIndexQuery}" >/dev/null; then
       assertSuccess "Found one or more playlist index locally\n"
@@ -310,17 +332,19 @@ customizeConfigFile() {
 
     assertTask 'Awaiting user selection for playlist modifiers...'
     playlistSelection
-
-    if [[ -f ${confFile} ]]; then
-      echo "${playlistModifier}" >>"${confFile}" &&
-        ${EDITOR:-vi} "${confFile}"
-    else
-      ${EDITOR:-vi} "+w ${confFile}" <<<"${playlistModifier}"
-    fi
-
   else
-    assertSuccess "Add config options manually\n"
-    ${EDITOR:-vi} "${confFile}"
+    assertMissing "No youtube-dl options added\n"
+    return
+  fi
+
+  [[ -s ${confFile} ]] && ${EDITOR:-vi} "${confFile}"
+
+  assertTask 'Saving config file...'
+  if [[ -s ${confFile} ]]; then
+    configFound=true
+    assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
+  else
+    assertMissing "No youtube-dl options found!\n"
   fi
 }
 
@@ -373,18 +397,7 @@ getConfigFilename() {
 createConfigFile() {
   assertTask 'Awaiting user input for config filename...'
   getConfigFilename
-
-  assertTask 'Customizing config file...'
   customizeConfigFile
-
-  assertTask 'Saving new config file...'
-  if [[ -f ${confFile} ]]; then
-    configFound=true
-    assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
-  else
-    assertError 'Config file not found!'
-    exit 1
-  fi
 }
 
 selectConfigFile() {
@@ -405,18 +418,20 @@ selectConfigFile() {
       assertSelection "
         Do you want to customize this config file?
         $(assertSuccess "Config file: '${confFilename}'")
-        Yes
         No
+        Yes
       " --header-lines 2
     )
 
-    assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
-
     if [[ ${isCustom} == Yes ]]; then
-      assertTask 'Finding local playlist index...'
+      assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
       customizeConfigFile
     else
-      return 1
+      if [[ -s ${confFile} ]]; then
+        assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
+      else
+        assertMissing "No youtube-dl options found!\n"
+      fi
     fi
   fi
 }
@@ -667,7 +682,7 @@ stream() {
 }
 
 processStream() {
-  if [[ ${confFile} ]]; then
+  if [[ -s ${confFile} ]]; then
     assertTask 'Streaming with custom youtube-dl config file...'
     stream --ytdl-raw-options=config-location="${confFile}" "$@"
   else
@@ -696,7 +711,7 @@ download() {
     assertSuccess 'Download directory:' "${PWD/#$HOME/\~}\n"
   fi
 
-  if [[ ${confFile} ]]; then
+  if [[ -s ${confFile} ]]; then
     assertTask 'Downloading with custom youtube-dl config file...'
     youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" 2>/dev/null
@@ -760,6 +775,7 @@ browse() {
   findConfig
 }
 
+#* --{ Main workflow }-- *#
 if [[ $1 =~ ^((--)?help|-h)$ ]]; then
   mpv --help
   exit
