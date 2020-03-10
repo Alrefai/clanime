@@ -284,7 +284,22 @@ parsePlaylistIndex() {
     assertSuccess "Parsing completed\n"
   else
     assertError 'Failed to parse playlist'
-    assertTryAgain parsePlaylistIndex
+    tryAgainOrSkip=$(
+      assertSelection "
+        Try again
+        Skip
+        Abort
+      "
+    )
+
+    if [[ ${tryAgainOrSkip} == Try* ]]; then
+      parsePlaylistIndex
+    elif [[ ${tryAgainOrSkip} == Abort ]]; then
+      assertError 'Aborted by user'
+      exit 1
+    else
+      assertMissing "Skipped by user\n"
+    fi
   fi
 }
 
