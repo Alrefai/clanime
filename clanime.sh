@@ -173,6 +173,11 @@ selectPlaylistIndex() {
 }
 
 playlistSelection() {
+  if [[ ! -s ${playlistIndex} ]]; then
+    assertMissing "No items in playlist index file\n"
+    return
+  fi
+
   fzfHeader='Select one or two items from the list'
   if ! playlistItems=$(
     fzf --exact --no-sort -m 2 --header "${fzfHeader}" <"${playlistIndex}" |
