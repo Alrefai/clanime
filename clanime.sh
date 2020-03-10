@@ -216,7 +216,7 @@ playlistSelection() {
 }
 
 playlistFilter() {
-  filter=$(
+  if ! filter=$(
     assertSelection '
       Select format filter
       Japanese audio (RAW)
@@ -224,20 +224,23 @@ playlistFilter() {
       Custome filter
       No filter
     ' --header-lines 1
-  ) || assertTryAgain playlistFilter
+  ); then
+    assertTryAgain playlistFilter
+  else
 
-  if [[ ${filter} == Japanese* ]]; then
-    format='[format_id*=jaJP][format_id!*=hardsub]'
-  elif [[ ${filter} == English* ]]; then
-    format='[format_id*=enUS][format_id!*=hardsub]'
-  elif [[ ${filter} == Custome* ]]; then
-    assertTask 'Awaiting user input for format filter...'
-    readHeader 'Modify format template below (then press [ENTER])'
-    readPrompt '' "${FORMAT_FILTER}"
-    format=${textInput}
+    if [[ ${filter} == Japanese* ]]; then
+      format='[format_id*=jaJP][format_id!*=hardsub]'
+    elif [[ ${filter} == English* ]]; then
+      format='[format_id*=enUS][format_id!*=hardsub]'
+    elif [[ ${filter} == Custome* ]]; then
+      assertTask 'Awaiting user input for format filter...'
+      readHeader 'Modify format template below (then press [ENTER])'
+      readPrompt '' "${FORMAT_FILTER}"
+      format=${textInput}
+    fi
+
+    assertSuccess "Format: ${format:-Default to 'best'}"
   fi
-
-  assertSuccess "Format: ${format:-Default to 'best'}"
 }
 
 parsePlaylistIndex() {
