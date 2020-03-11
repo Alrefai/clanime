@@ -2,6 +2,7 @@
 
 set -o pipefail
 
+#* --{ Settings with Environment Variables }-- *#
 CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
 CONFIG_DIR=${CONFIG_HOME}/clanime
 USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
@@ -9,8 +10,22 @@ CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
 SERIES_DIR="${SERIES_DIR:-1}"
 ANIME_DIR="${ANIME_DIR}"
+
+## Playlist index options
 PARSE_INDEX_START="${PARSE_INDEX_START:-1}"
+
+## Format filer options
 FORMAT_FILTER="${FORMAT_FILTER:-[format_id*=jaJP][format_id!*=hardsub]}"
+
+## Output template options
+SAFE_SERIES="${ANIME_SAFE_SERIES_NAME}"
+NAME_SUFFIX="${ANIME_SERIES_NAME_SUFFIX:- - }"
+SEASON_PREFIX="${ANIME_SERIES_SEASON_PREFIX}"
+SEASON_SUFFIX="${ANIME_SERIES_SEASON_SUFFIX:-x}"
+EPISODE_PREFIX="${ANIME_SERIES_EPISODE_PREFIX}"
+EPISODE_SUFFIX="${ANIME_SERIES_EPISODE_SUFFIX:-03d - }"
+OUTPUT_TEMPLATE="${ANIME_OUTPUT_TEMPLATE}"
+#* End of Settings *#
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
@@ -220,6 +235,45 @@ playlistSelection() {
   fi
 }
 
+outputTemplate() {
+  if ! templateSelection=${OUTPUT_TEMPLATE:-$(
+    assertSelection '
+      Select output template season number preset
+      Single season
+      Multi seasons
+      Custome season
+      Skip
+    ' --header-lines 1
+  )}; then
+    assertTryAgain outputTemplate
+  else
+
+    if [[ ${SAFE_SERIES} != 0 ]]; then
+      seriesName="${seriesTitle}"
+    else
+      seriesName='%(series)s'
+    fi
+
+    if [[ ${templateSelection} == Single* ]]; then
+      seriesSeasonNumber='1'
+    elif [[ ${templateSelection} == Multi* ]]; then
+      seriesSeasonNumber='%(season_number)1d'
+    elif [[ ${templateSelection} != Skip ]]; then
+      assertTask 'Awaiting user input for custome season number...'
+      readHeader 'Modify season number below (then press [ENTER])'
+      readPrompt '' '0'
+      seriesSeasonNumber=${textInput}
+    else
+      assertMissing "Skipped output template\n"
+      return
+    fi
+
+    template="${seriesName}${NAME_SUFFIX}${SEASON_PREFIX}${seriesSeasonNumber}${SEASON_SUFFIX}${EPISODE_PREFIX}%(episode_number)${EPISODE_SUFFIX}%(episode)s.%(ext)s"
+    echo "-o '${template}'" >>"${confFile}"
+    assertSuccess 'Output template:' "${template}\n"
+  fi
+}
+
 playlistFilter() {
   if ! filter=$(
     assertSelection '
@@ -308,8 +362,9 @@ ytdlConfOptions() {
     assertSelection "
       Select one or more youtube-dl options
       --format FORMAT
-      --playlist-(start|end|items) (NUMBER|ITEM_SPEC)
-    " --header-lines 1 -m 2
+      --playlist-(start|end) NUMBER || --playlist-items ITEM_SPEC
+      --output TEMPLATE
+    " --header-lines 1 -m
   ) || assertTryAgain ytdlConfOptions
 }
 
@@ -378,6 +433,11 @@ customizeConfigFile() {
 
     assertTask 'Awaiting user selection for playlist modifiers...'
     playlistSelection
+  fi
+
+  if grep -qE '^--output' <<<"${configOptions}"; then
+    assertTask 'Awaiting user selection for output template...'
+    outputTemplate
   fi
 
   [[ -s ${confFile} ]] && ${EDITOR:-vi} "${confFile}"
