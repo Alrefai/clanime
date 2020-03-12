@@ -153,24 +153,26 @@ selectModifiers() {
 confirmModifiers() {
   selectModifiers "$@"
   modifiersCount=$(wc -l <<<"${playlistModifier}")
-  confirmModifiers=$(
+  if ! confirmModifiers=$(
     assertSelection "
       Confirm playlist modifiers?
       $(assertSuccess "Playlist modifiers:\n${playlistModifier}")
       Yes
       No, reselect index numbers
-      Abort
+      Skip
     " --header-lines $((modifiersCount + 2))
-  )
-
-  if [[ ${confirmModifiers} == Yes* ]]; then
-    assertSuccess "Playlist modifiers:" "\n${playlistModifier}\n"
-    echo "${playlistModifier}" >>"${confFile}"
-  elif [[ ${confirmModifiers} == No* ]]; then
-    playlistSelection
+  ); then
+    assertTryAgain confirmModifiers "$@"
   else
-    assertError 'Aborted by user'
-    exit 1
+
+    if [[ ${confirmModifiers} == Yes* ]]; then
+      assertSuccess 'Playlist modifiers:' "\n${playlistModifier}\n"
+      echo "${playlistModifier}" >>"${confFile}"
+    elif [[ ${confirmModifiers} == No* ]]; then
+      playlistSelection
+    else
+      assertMissing "Skipped by user\n"
+    fi
   fi
 }
 
@@ -561,7 +563,7 @@ selectSeries() {
         Try again
         $([[ $1 == Seasons ]] && echo 'Select different season')
         Abort
-    " --phony
+      "
     )
 
     if [[ ${handleSeriesError} == Try* ]]; then
@@ -787,6 +789,7 @@ stream() {
     mpv --profile=crunchyroll "$@" -- "${seriesURL}"
   else
     assertError 'Aborted by user'
+    exit 1
   fi
 }
 
