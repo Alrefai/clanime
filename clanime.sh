@@ -190,7 +190,7 @@ selectPlaylistIndex() {
     assertTryAgain selectPlaylistIndex
   fi
 
-  assertSuccess "Playlist index file:" "${playlistIndex/#$HOME/\~}\n"
+  assertSuccess 'Playlist index file:' "${playlistIndex/#$HOME/\~}\n"
 }
 
 playlistSelection() {
@@ -234,7 +234,7 @@ playlistSelection() {
     if [[ $(awk '{print NR}' <<<"${playlistItems}") == 1 ]]; then
       confirmModifiers 1 'a modifier'
     else
-      range=$(paste -sd "-" - <<<"${playlistItems}")
+      range=$(paste -sd '-' - <<<"${playlistItems}")
       playlistModifiers="${playlistModifiers}\n--playlist-items ${range}"
       confirmModifiers 2 'one or two modifiers'
     fi
@@ -345,11 +345,11 @@ parsePlaylistIndex() {
   else
     assertError 'Failed to parse playlist'
     tryAgainOrSkip=$(
-      assertSelection "
+      assertSelection '
         Try again
         Skip
         Abort
-      "
+      '
     )
 
     if [[ ${tryAgainOrSkip} == Try* ]]; then
@@ -365,22 +365,22 @@ parsePlaylistIndex() {
 
 ytdlConfOptions() {
   configOptions=$(
-    assertSelection "
+    assertSelection '
       Select one or more youtube-dl options
       --format FORMAT
       --playlist-(start|end) NUMBER || --playlist-items ITEM_SPEC
       --output TEMPLATE
-    " --header-lines 1 -m
+    ' --header-lines 1 -m
   ) || assertTryAgain ytdlConfOptions
 }
 
 customizeConfigFile() {
   assertTask 'Customizing config file...'
   useConfigWizard=$(
-    assertSelection "
+    assertSelection '
       Use Config Wizard
       Add youtube-dl options manually
-    "
+    '
   )
 
   if [[ ${useConfigWizard} != *Wizard ]]; then
@@ -415,11 +415,11 @@ customizeConfigFile() {
       assertSuccess "Found one or more playlist index locally\n"
 
       playlistIndexPrompt=$(
-        assertSelection "
+        assertSelection '
           Do you want to use existing playlist index?
           Yes
           No, create a new playlist index with youtube-dl
-        " --header-lines 1
+        ' --header-lines 1
       )
 
       if [[ ${playlistIndexPrompt} == Yes ]]; then
@@ -451,7 +451,7 @@ customizeConfigFile() {
   assertTask 'Saving config file...'
   if [[ -s ${confFile} ]]; then
     configFound=true
-    assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
+    assertSuccess 'Config file:' "${confFile/#$HOME/\~}\n"
   else
     assertMissing "No youtube-dl options found!\n"
   fi
@@ -459,7 +459,7 @@ customizeConfigFile() {
 
 getConfigFilename() {
   readHeader \
-    "Append text to series title or leave it as is (then press [ENTER])"
+    'Append text to series title or leave it as is (then press [ENTER])'
   readPrompt "${seriesTitle}"
   confFilename=$(safeFilename <<<"${seriesTitle}${textInput}").conf
 
@@ -497,7 +497,7 @@ getConfigFilename() {
 
   if [[ ${confirmConfFile} == Yes* ]]; then
     confFile="${CONFIG_DIR}/${confFilename}"
-    assertSuccess "Config filename:" "${confFilename}\n"
+    assertSuccess 'Config filename:' "${confFilename}\n"
   else
     getConfigFilename
   fi
@@ -535,11 +535,11 @@ selectConfigFile() {
     )
 
     if [[ ${isCustom} == Yes ]]; then
-      assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
+      assertSuccess 'Config file:' "${confFile/#$HOME/\~}\n"
       customizeConfigFile
     else
       if [[ -s ${confFile} ]]; then
-        assertSuccess "Config file:" "${confFile/#$HOME/\~}\n"
+        assertSuccess 'Config file:' "${confFile/#$HOME/\~}\n"
       else
         assertMissing "No youtube-dl options found!\n"
       fi
@@ -555,7 +555,7 @@ selectSeries() {
     seriesTitle=$(awk -F '\t' '{print $2}' <<<"${series}")
     seriesURL=$(sed "${seriesIndex}q;d" <<<"${seriesList}")
     assertSuccess "Series: ${seriesTitle}"
-    assertSuccess "URL:" "${seriesURL}"
+    assertSuccess 'URL:' "${seriesURL}"
   else
     assertError 'No title selected'
     handleSeriesError=$(
@@ -589,7 +589,7 @@ createSeriesList() {
   )
 
   if [[ ${seriesList} ]]; then
-    assertSuccess "Series list:" "\n${seriesList}\n"
+    assertSuccess 'Series list:' "\n${seriesList}\n"
   else
     assertError 'Could not parse URLs from series list HTML document'
     exit 1
@@ -705,8 +705,8 @@ processConfig() {
       assertSelection '
         Select a config file
         Create a new config file
-        Cancel!
-      ' --phony
+        Skip
+      '
     )
 
     if [[ ${useExistingConf} == Select* ]]; then
@@ -737,18 +737,19 @@ stream() {
     assertTask 'Creating MPV config templates...'
     mkdir -p ~/.config/mpv
     cp -r /usr/local/share/doc/mpv/ ~/.config/mpv/
-    assertSuccess "MPV config file:" "${mpvConf/#$HOME/\~}\n"
+    assertSuccess 'MPV config file:' "${mpvConf/#$HOME/\~}\n"
   fi
 
   if ! grep -q '\[crunchyroll\]' "${mpvConf}"; then
     assertMissing "Crunchyroll profile was not found in MPV config file\n"
-    assertTask 'Appending Crunchyroll profile to MPV config file...'
+    assertTask 'Appending example Crunchyroll profile to MPV config file...'
 
     mpvProfile="
-     [crunchyroll]
-     fs=yes
-     ytdl-format='[format_id*=jaJP][format_id!*=hardsub]'
-     ytdl-raw-options=netrc=
+      [crunchyroll]
+      fs=yes
+      ytdl-format='[format_id*=jaJP][format_id!*=hardsub]'
+      ytdl-raw-options=netrc=
+      # ytdl-raw-options=cookies=${CONFIG_DIR/#$HOME/\~}/cookie.txt
     "
 
     trimWhiteSpace "${mpvProfile}" >>"${mpvConf}"
@@ -849,10 +850,10 @@ download() {
 
 downloadOrStream() {
   streamOrDownload=$(
-    assertSelection "
+    assertSelection '
       Stream
       Download
-    " --phony
+    '
   )
 
   if [[ ${streamOrDownload} == Stream ]]; then
@@ -878,7 +879,7 @@ selectFromWatchList() {
 
   if [[ ${seriesTitle} && ${seriesURL} ]]; then
     assertSuccess "Series: ${seriesTitle}"
-    assertSuccess "URL:" "${seriesURL}\n"
+    assertSuccess 'URL:' "${seriesURL}\n"
   else
     assertTryAgain selectFromWatchList
   fi
@@ -887,7 +888,7 @@ selectFromWatchList() {
 browse() {
   if [[ ! $1 ]]; then
     exit 1
-  elif [[ $1 == "Watching" ]]; then
+  elif [[ $1 == Watching ]]; then
     assertTask 'Awaiting user selection from watching list...'
     selectFromWatchList
   else
@@ -912,18 +913,18 @@ fi
 if [[ ! -d ${CONFIG_DIR} ]]; then
   assertTask "Creating 'config' directory..."
   mkdir -p "${CONFIG_DIR}"
-  assertSuccess "Config directory:" "${CONFIG_DIR}\n"
+  assertSuccess 'Config directory:' "${CONFIG_DIR}\n"
 fi
 
 browsingList="
-  $([[ -s $LIST_JSON ]] && echo "Watching List")
+  $([[ -s $LIST_JSON ]] && echo 'Watching List')
   Popular List
   Simulcasts List
   Updated List
   Seasons List
 "
 
-assertTask "Awaiting user selection from main options..."
+assertTask 'Awaiting user selection from main options...'
 main=$(
   assertSelection "
     ${browsingList}
@@ -956,7 +957,7 @@ else
       assertSelection '
         Process another config file for selected series
         Cancel
-      ' --phony
+      '
     )
     if [[ ${repeat} != Process* ]]; then
       assertSuccess 'Done'
