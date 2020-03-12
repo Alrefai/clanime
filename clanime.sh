@@ -805,7 +805,7 @@ processStream() {
 }
 
 download() {
-  if [[ ${ANIME_DIR} || ! ${SERIES_DIR} == 0 ]]; then
+  if [[ ${ANIME_DIR} || ${SERIES_DIR} != 0 ]]; then
     assertTask 'Changing directory...'
 
     [[ ${ANIME_DIR} ]] && if ! cd "${ANIME_DIR}"; then
@@ -813,7 +813,7 @@ download() {
       exit 1
     fi
 
-    if [[ ! ${SERIES_DIR} == 0 ]]; then
+    if [[ ${SERIES_DIR} != 0 ]]; then
       [[ -d ${seriesTitle} ]] || mkdir "${seriesTitle}"
       if ! cd "${seriesTitle}"; then
         assertError 'Could not change to series directory'
