@@ -8,7 +8,9 @@ CONFIG_DIR=${CONFIG_HOME}/clanime
 USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
-SERIES_DIR="${SERIES_DIR:-1}"
+
+## Download directory options
+SERIES_DIR="${SERIES_DIR}"
 ANIME_DIR="${ANIME_DIR}"
 
 ## Playlist index options
