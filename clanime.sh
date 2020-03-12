@@ -120,7 +120,13 @@ downloadPage() {
 }
 
 safeFilename() {
-  perl -pe "s/^\W+|(?!(?:COM[0-9]|CON|LPT[0-9]|NUL|PRN|AUX|com[0-9]|con|lpt[0-9]|nul|prn|aux)|[\s\.])[\/:*\"?<>|~\\\\;]{1,254}/_/g"
+  beSafe='
+    s/^\W+|(?!
+    (?:COM[0-9]|CON|LPT[0-9]|NUL|PRN|AUX|com[0-9]|con|lpt[0-9]|nul|prn|aux)
+    |[\s\.])
+    [\/:*\"?<>|~\\\\;]{1,254}/_/g
+  '
+  perl -pe "${beSafe//[[:space:]]/}"
 }
 
 readHeader() {
@@ -276,7 +282,17 @@ outputTemplate() {
       return
     fi
 
-    template="${seriesName}${NAME_SUFFIX}${SEASON_PREFIX}${seriesSeasonNumber}${SEASON_SUFFIX}${EPISODE_PREFIX}%(episode_number)${EPISODE_SUFFIX}%(episode)s.%(ext)s"
+    templateBlocks="
+      ${seriesName}${NAME_SUFFIX}
+      ${SEASON_PREFIX}${seriesSeasonNumber}${SEASON_SUFFIX}
+      ${EPISODE_PREFIX}%(episode_number)${EPISODE_SUFFIX}
+      %(episode)s.%(ext)s
+    "
+
+    template="$(
+      echo "${templateBlocks}" | sed 's/^[[:space:]]*//' | tr -d '\n'
+    )"
+
     echo "-o '${template}'" >>"${confFile}"
     assertSuccess 'Output template:' "${template}\n"
   fi
