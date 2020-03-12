@@ -25,6 +25,10 @@ SEASON_SUFFIX="${ANIME_SERIES_SEASON_SUFFIX:-x}"
 EPISODE_PREFIX="${ANIME_SERIES_EPISODE_PREFIX}"
 EPISODE_SUFFIX="${ANIME_SERIES_EPISODE_SUFFIX:-03d - }"
 OUTPUT_TEMPLATE="${ANIME_OUTPUT_TEMPLATE}"
+
+## Renaming subtitles to ISO 639-1 code format option
+ISO_SUB="${ANIME_ISO_SUB}"
+
 #* End of Settings *#
 
 baseURL='https://www.crunchyroll.com'
@@ -827,6 +831,16 @@ download() {
     youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
     ) "$@"
+  fi
+
+  if [[ ${ISO_SUB} != 0 ]]; then
+    echo
+    assertTask 'Renaming subtitles to ISO 639-1 code format...'
+    if ! for file in *[A-Z][A-Z].ass; do
+      mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass"
+    done 2>/dev/null; then
+      assertMissing "No matching subtitles were found that require renaming\n"
+    fi
   fi
 }
 
