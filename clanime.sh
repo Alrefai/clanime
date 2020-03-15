@@ -293,7 +293,7 @@ outputTemplate() {
       echo "${templateBlocks}" | sed 's/^[[:space:]]*//' | tr -d '\n'
     )"
 
-    echo "-o '${template}'" >>"${confFile}"
+    echo "-o \"${template}\"" >>"${confFile}"
     assertSuccess 'Output template:' "${template}\n"
   fi
 }
