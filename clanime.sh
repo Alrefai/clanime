@@ -3,6 +3,8 @@
 set -o pipefail
 
 #* --{ Settings with Environment Variables }-- *#
+CACHE_HOME=${XDG_CACHE_HOME:-${HOME}/.cache}
+CACHE_DIR=${CACHE_HOME}/clanime
 CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
 CONFIG_DIR=${CONFIG_HOME}/clanime
 USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
@@ -932,6 +934,12 @@ if [[ ! -d ${CONFIG_DIR} ]]; then
   assertTask "Creating 'config' directory..."
   mkdir -p "${CONFIG_DIR}"
   assertSuccess 'Config directory:' "${CONFIG_DIR}\n"
+fi
+
+if [[ ! -d ${CACHE_DIR} ]]; then
+  assertTask "Creating 'cache' directory..."
+  mkdir -p "${CACHE_DIR}"
+  assertSuccess 'Cache directory:' "${CACHE_DIR}\n"
 fi
 
 browsingList="
