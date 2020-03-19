@@ -11,6 +11,9 @@ USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
 
+## Download archive path option
+ARCHIVE_PATH="${ANIME_DOWNLOAD_ARCHIVE}"
+
 ## Download directory options
 SERIES_DIR="${SERIES_DIR}"
 ANIME_DIR="${ANIME_DIR}"
@@ -844,17 +847,39 @@ download() {
     assertSuccess 'Download directory:' "${PWD/#$HOME/\~}\n"
   fi
 
+  archivePath="${ARCHIVE_PATH:-${PWD}/archive.txt}"
+  archiveDir="$(dirname "${archivePath}")"
+
+  archiveAssertion() {
+    if [[ -w ${archiveDir} ]]; then
+      if grep -qE '.txt$' <<<"${archivePath}"; then
+        assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
+      else
+        assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
+        assertError "Download archive file extension must be '.txt'"
+        exit 1
+      fi
+    else
+      assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
+      assertError 'Invalid download archive path.' \
+        'Make sure to set a valid path with writting permission!!!'
+      exit 1
+    fi
+  }
+
   if [[ -s ${confFile} ]]; then
     assertTask 'Downloading with custom youtube-dl config file...'
+    archiveAssertion
     youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" 2>/dev/null
-    ) "$@"
+    ) --download-archive "${archivePath}" "$@"
 
   else
     assertTask 'Downloading with youtube-dl...'
+    archiveAssertion
     youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
-    ) "$@"
+    ) --download-archive "${archivePath}" "$@"
   fi
 
   if [[ ${ISO_SUB} != 0 ]]; then
