@@ -3,11 +3,16 @@
 set -o pipefail
 
 #* --{ Settings with Environment Variables }-- *#
+CACHE_HOME=${XDG_CACHE_HOME:-${HOME}/.cache}
+CACHE_DIR=${CACHE_HOME}/clanime
 CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
 CONFIG_DIR=${CONFIG_HOME}/clanime
 USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
+
+## Download archive path option
+ARCHIVE_PATH="${ANIME_DOWNLOAD_ARCHIVE}"
 
 ## Download directory options
 SERIES_DIR="${SERIES_DIR}"
@@ -822,6 +827,51 @@ processStream() {
   fi
 }
 
+downloadPostProcess() {
+  downloadLog="${CACHE_DIR}/download-log.txt"
+  archiveExtra="${archivePath%.txt}-extra.txt"
+
+  if script -q "${downloadLog}" "${@}" || [[ $? == 1 ]]; then
+    assertSuccess 'Download log file:' "${downloadLog/#$HOME/\~}"
+  else
+    assertMissing "Saving download log to file was interrupted"
+  fi
+
+  if grep -q 'requested format not available' "${downloadLog}"; then
+    echo
+    assertTask 'Adding video-IDs with no matching format to archive...'
+    formatNotAvailableIDs=$(
+      awk '/^\[crunchyroll\]/{a=$0}/format not available/{print a"\n"$0}' \
+        "${downloadLog}" |
+        grep '\[crunchyroll\]' |
+        awk '{print $1, $2}' |
+        sed 's/[][]//g' |
+        sed 's/:$//'
+    )
+
+    if [[ ${formatNotAvailableIDs} ]]; then
+      echo "${formatNotAvailableIDs}" >>"${archiveExtra}" &&
+        assertSuccess 'IDs saved to:' "${archiveExtra/#$HOME/\~}"
+
+      echo "${formatNotAvailableIDs}" >>"${archivePath}" &&
+        assertSuccess 'IDs saved to:' "${archivePath/#$HOME/\~}"
+    else
+      assertError 'Could not parse IDs from download log file'
+    fi
+
+  fi
+
+  if [[ ${ISO_SUB} != 0 ]]; then
+    echo
+    assertTask 'Renaming subtitles to ISO 639-1 code format...'
+    if ! for file in *[A-Z][A-Z].ass; do
+      mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass"
+    done 2>/dev/null; then
+      assertMissing "No matching subtitle that require renaming was found\n"
+    fi
+  fi
+}
+
 download() {
   if [[ ${ANIME_DIR} || ${SERIES_DIR} != 0 ]]; then
     assertTask 'Changing directory...'
@@ -842,27 +892,39 @@ download() {
     assertSuccess 'Download directory:' "${PWD/#$HOME/\~}\n"
   fi
 
+  archivePath="${ARCHIVE_PATH:-${PWD}/archive.txt}"
+  archiveDir="$(dirname "${archivePath}")"
+
+  archiveAssertion() {
+    if [[ -w ${archiveDir} ]]; then
+      if grep -qE '.txt$' <<<"${archivePath}"; then
+        assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
+      else
+        assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
+        assertError "Download archive file extension must be '.txt'"
+        exit 1
+      fi
+    else
+      assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
+      assertError 'Invalid download archive path.' \
+        'Make sure to set a valid path with writting permission!!!'
+      exit 1
+    fi
+  }
+
   if [[ -s ${confFile} ]]; then
     assertTask 'Downloading with custom youtube-dl config file...'
-    youtube-dl "${seriesURL}" --config-location <(
+    archiveAssertion
+    downloadPostProcess youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" 2>/dev/null
-    ) "$@"
+    ) --download-archive "${archivePath}" "$@"
 
   else
     assertTask 'Downloading with youtube-dl...'
-    youtube-dl "${seriesURL}" --config-location <(
+    archiveAssertion
+    downloadPostProcess youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
-    ) "$@"
-  fi
-
-  if [[ ${ISO_SUB} != 0 ]]; then
-    echo
-    assertTask 'Renaming subtitles to ISO 639-1 code format...'
-    if ! for file in *[A-Z][A-Z].ass; do
-      mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass"
-    done 2>/dev/null; then
-      assertMissing "No matching subtitles were found that require renaming\n"
-    fi
+    ) --download-archive "${archivePath}" "$@"
   fi
 }
 
@@ -932,6 +994,12 @@ if [[ ! -d ${CONFIG_DIR} ]]; then
   assertTask "Creating 'config' directory..."
   mkdir -p "${CONFIG_DIR}"
   assertSuccess 'Config directory:' "${CONFIG_DIR}\n"
+fi
+
+if [[ ! -d ${CACHE_DIR} ]]; then
+  assertTask "Creating 'cache' directory..."
+  mkdir -p "${CACHE_DIR}"
+  assertSuccess 'Cache directory:' "${CACHE_DIR}\n"
 fi
 
 browsingList="
