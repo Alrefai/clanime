@@ -827,6 +827,51 @@ processStream() {
   fi
 }
 
+downloadPostProcess() {
+  downloadLog="${CACHE_DIR}/download-log.txt"
+  archiveExtra="${archivePath%.txt}-extra.txt"
+
+  if script -q "${downloadLog}" "${@}" || [[ $? == 1 ]]; then
+    assertSuccess 'Download log file:' "${downloadLog/#$HOME/\~}"
+  else
+    assertMissing "Saving download log to file was interrupted"
+  fi
+
+  if grep -q 'requested format not available' "${downloadLog}"; then
+    echo
+    assertTask 'Adding video-IDs with no matching format to archive...'
+    formatNotAvailableIDs=$(
+      awk '/^\[crunchyroll\]/{a=$0}/format not available/{print a"\n"$0}' \
+        "${downloadLog}" |
+        grep '\[crunchyroll\]' |
+        awk '{print $1, $2}' |
+        sed 's/[][]//g' |
+        sed 's/:$//'
+    )
+
+    if [[ ${formatNotAvailableIDs} ]]; then
+      echo "${formatNotAvailableIDs}" >>"${archiveExtra}" &&
+        assertSuccess 'IDs saved to:' "${archiveExtra/#$HOME/\~}"
+
+      echo "${formatNotAvailableIDs}" >>"${archivePath}" &&
+        assertSuccess 'IDs saved to:' "${archivePath/#$HOME/\~}"
+    else
+      assertError 'Could not parse IDs from download log file'
+    fi
+
+  fi
+
+  if [[ ${ISO_SUB} != 0 ]]; then
+    echo
+    assertTask 'Renaming subtitles to ISO 639-1 code format...'
+    if ! for file in *[A-Z][A-Z].ass; do
+      mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass"
+    done 2>/dev/null; then
+      assertMissing "No matching subtitle that require renaming was found\n"
+    fi
+  fi
+}
+
 download() {
   if [[ ${ANIME_DIR} || ${SERIES_DIR} != 0 ]]; then
     assertTask 'Changing directory...'
@@ -870,26 +915,16 @@ download() {
   if [[ -s ${confFile} ]]; then
     assertTask 'Downloading with custom youtube-dl config file...'
     archiveAssertion
-    youtube-dl "${seriesURL}" --config-location <(
+    downloadPostProcess youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" 2>/dev/null
     ) --download-archive "${archivePath}" "$@"
 
   else
     assertTask 'Downloading with youtube-dl...'
     archiveAssertion
-    youtube-dl "${seriesURL}" --config-location <(
+    downloadPostProcess youtube-dl "${seriesURL}" --config-location <(
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
     ) --download-archive "${archivePath}" "$@"
-  fi
-
-  if [[ ${ISO_SUB} != 0 ]]; then
-    echo
-    assertTask 'Renaming subtitles to ISO 639-1 code format...'
-    if ! for file in *[A-Z][A-Z].ass; do
-      mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass"
-    done 2>/dev/null; then
-      assertMissing "No matching subtitles were found that require renaming\n"
-    fi
   fi
 }
 
