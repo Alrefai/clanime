@@ -837,16 +837,21 @@ downloadPostProcess() {
     assertMissing "Saving download log to file was interrupted"
   fi
 
+  videoIDs() {
+    awk "$@" "${downloadLog}" |
+      grep '\[crunchyroll\]' |
+      awk '{print $1, $2}' |
+      sed 's/[][]//g;s/://' |
+      uniq
+  }
+
   if grep -q 'requested format not available' "${downloadLog}"; then
     echo
     assertTask 'Adding video-IDs with no matching format to archive...'
+
     formatNotAvailableIDs=$(
-      awk '/^\[crunchyroll\]/{a=$0}/format not available/{print a"\n"$0}' \
-        "${downloadLog}" |
-        grep '\[crunchyroll\]' |
-        awk '{print $1, $2}' |
-        sed 's/[][]//g' |
-        sed 's/:$//'
+      # shellcheck disable=SC2016
+      videoIDs '/^\[crunchyroll\]/{a=$0}/format not available/{print a"\n"$0}'
     )
 
     if [[ ${formatNotAvailableIDs} ]]; then
@@ -859,6 +864,88 @@ downloadPostProcess() {
       assertError 'Could not parse IDs from download log file'
     fi
 
+  fi
+
+  errPatternsList='
+    Error in the pull function
+    PES packet size mismatch
+    Failed to open segment
+    Unable to open resource
+  '
+
+  errPatterns=$(trimWhiteSpace "${errPatternsList}" | paste -sd '|' -)
+
+  if grep -qE "${errPatterns}" "${downloadLog}"; then
+    fragmentedFiles=$(
+      awk \
+        '/^\[download\] Destination/{a=$0}/'"${errPatterns}"'/{print a"\n"$0}' \
+        "${downloadLog}" |
+        grep '\[download\] Destination' |
+        awk -F ': ' '{print $2}' |
+        uniq
+    )
+
+    fragmentedFilesList=$(grep -Ff <(find -- *.mp4) <<<"${fragmentedFiles}")
+
+    if [[ ${fragmentedFilesList} ]]; then
+      echo
+      assertTask 'Listing fragmented files...'
+
+      while IFS= read -r file; do
+        assertMissing "${file}"
+      done <<<"${fragmentedFilesList}"
+
+      echo
+      assertTask 'Deleting fragmented files from disk...'
+
+      deleteFragmentedFiles=$(
+        assertSelection '
+          Confirm permanently deleting fragmented files from disk!
+          Yes
+          No
+        ' --header-lines 1
+      )
+
+      if [[ ${deleteFragmentedFiles} == Yes ]]; then
+        while IFS= read -r file; do
+          rm -f -- "${PWD}/${file/$'\r'/}"
+
+          if ! find "${file/$'\r'/}" &>/dev/null; then
+            assertSuccess 'Deleted:' "${file}"
+          else
+            assertMissing 'Could not delete:' "${file}"
+          fi
+
+        done <<<"${fragmentedFilesList}"
+      else
+        assertMissing 'Canceled by user'
+      fi
+
+      echo
+      assertTask 'Removing fragmented video-IDs from archive...'
+
+      fragmentedIDs=$(
+        # shellcheck disable=SC2016
+        videoIDs '/^\[crunchyroll\]/{a=$0}/'"${errPatterns}"'/{print a"\n"$0}'
+      )
+
+      if [[ ${fragmentedIDs} ]]; then
+        assertSuccess 'Backup:' "$(cp -v "${archivePath/#$HOME/\~}"{,.bak})"
+
+        while IFS= read -r id; do
+          sed -ni '' "/^${id}$/!p" "${archivePath}"
+          if ! grep -qxF "${id}" "${archivePath}"; then
+            assertSuccess 'Removed ID:' "${id}"
+          else
+            assertMissing 'Could not remove ID:' "${id}"
+          fi
+        done <<<"${fragmentedIDs}"
+
+      else
+        assertError 'Could not parse fragmented video-IDs'
+      fi
+
+    fi
   fi
 
   if [[ ${ISO_SUB} != 0 ]]; then
