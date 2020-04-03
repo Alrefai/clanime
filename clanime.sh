@@ -10,6 +10,7 @@ CONFIG_DIR=${CONFIG_HOME}/clanime
 USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
+DL_LOG="${CACHE_DIR}/download-log.txt"
 
 ## Download archive path option
 ARCHIVE_PATH="${ANIME_DOWNLOAD_ARCHIVE}"
@@ -144,6 +145,10 @@ readPrompt() {
   IFS= read \
     -erp "${cyanText}Text input ${magentaBoldText}->${reset} ${prefix}" \
     -i "${suffix}" textInput
+}
+
+isPlural() {
+  test "$(wc -l <<<"$1")" -gt 1 && echo s
 }
 
 selectModifiers() {
@@ -827,32 +832,21 @@ processStream() {
   fi
 }
 
-downloadPostProcess() {
-  downloadLog="${CACHE_DIR}/download-log.txt"
-  archiveExtra="${archivePath%.txt}-extra.txt"
+getVideoID() {
+  # shellcheck disable=SC2016
+  local pattern='/^\[crunchyroll\]/{a=$0}/'"${*:-1}"'/{print a"\n"$0}'
+  awk "${@:1:$#-1}" "${pattern}" "${DL_LOG}" |
+    grep -F '[crunchyroll]' |
+    awk '{print $1, $2}' |
+    sed 's/[][]//g;s/://' |
+    uniq # Don't use `sort` command. It breaks renameSubtitles function for reversed playlist
+}
 
-  if script -q "${downloadLog}" "${@}" || [[ $? == 1 ]]; then
-    assertSuccess 'Download log file:' "${downloadLog/#$HOME/\~}"
-  else
-    assertMissing "Saving download log to file was interrupted"
-  fi
-
-  videoIDs() {
-    awk "$@" "${downloadLog}" |
-      grep '\[crunchyroll\]' |
-      awk '{print $1, $2}' |
-      sed 's/[][]//g;s/://' |
-      uniq
-  }
-
-  if grep -q 'requested format not available' "${downloadLog}"; then
+archiveVideoID() {
+  if grep -qF 'requested format not available' "${DL_LOG}"; then
     echo
     assertTask 'Adding video-IDs with no matching format to archive...'
-
-    formatNotAvailableIDs=$(
-      # shellcheck disable=SC2016
-      videoIDs '/^\[crunchyroll\]/{a=$0}/format not available/{print a"\n"$0}'
-    )
+    formatNotAvailableIDs=$(getVideoID 'format not available')
 
     if [[ ${formatNotAvailableIDs} ]]; then
       echo "${formatNotAvailableIDs}" >>"${archiveExtra}" &&
@@ -865,7 +859,28 @@ downloadPostProcess() {
     fi
 
   fi
+}
 
+renameSubtitles() {
+  if [[ ${ISO_SUB} != 0 ]]; then
+    while pgrep -qf "youtube-dl ${seriesURL}"; do
+      sleep 10
+      lastVideoID=$(getVideoID '[Vv]ideo subtitle' | sed '$!d')
+      [[ ${lastVideoID} != "${videoID:-}" ]] || continue
+      sleep 2
+
+      for file in *[A-Z][A-Z].ass; do
+        echo \
+          "${cyanText}[${magentaBoldText}" \
+          "rename subtitle to ISO 639-1" \
+          "${cyanText}]${reset}" \
+          "$(mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass")"
+      done 2>/dev/null && videoID="${lastVideoID}"
+    done
+  fi
+}
+
+fragmentMonitor() {
   errPatternsList='
     Error in the pull function
     PES packet size mismatch
@@ -875,88 +890,109 @@ downloadPostProcess() {
 
   errPatterns=$(trimWhiteSpace "${errPatternsList}" | paste -sd '|' -)
 
-  if grep -qE "${errPatterns}" "${downloadLog}"; then
-    fragmentedFiles=$(
-      awk \
-        '/^\[download\] Destination/{a=$0}/'"${errPatterns}"'/{print a"\n"$0}' \
-        "${downloadLog}" |
-        grep '\[download\] Destination' |
-        awk -F ': ' '{print $2}' |
-        uniq
+  until grep -qE "${errPatterns}" "${DL_LOG}"; do
+    sleep 1
+    if ! pgrep -qf "youtube-dl ${seriesURL}"; then
+      #! This check is important!
+      # In case youtube-dl was terminated before an error pattern was catched.
+      grep -qE "${errPatterns}" "${DL_LOG}" && break
+      return
+    fi
+  done
+
+  pkill -f "youtube-dl ${seriesURL}"
+  sleep 2
+  kill "${youtubeDLPID}" &>/dev/null
+  sleep 3
+
+  fragmentedDownload=$(
+    awk \
+      '/^\[download\] Destination/{a=$0}/'"${errPatterns}"'/{print a"\n"$0}' \
+      "${DL_LOG}" |
+      grep -F '[download] Destination' |
+      awk -F ': ' '{print $2}' |
+      sort --unique |
+      tr -d '\r'
+  )
+
+  local header='Found more than one file. Select one or more files to delete...'
+  filesToDelete=$(
+    find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null |
+      fzf -m --header "${header}"
+  )
+
+  if [[ ${filesToDelete} ]]; then
+    assertError "Fragment error detected! Download terminated."
+    echo
+    pluralFile=$(isPlural "${filesToDelete}")
+    assertTask "Deleting fragmented file${pluralFile} from disk..."
+    foundPattern=$(grep -oE "${errPatterns}" "${DL_LOG}" | sort --unique)
+
+    if [[ ${foundPattern} ]]; then
+      while IFS= read -r pattern; do
+        assertMissing 'Detected error:' "${pattern}"
+      done <<<"${foundPattern}"
+    fi
+
+    filesCount=$(wc -l <<<"${filesToDelete}")
+
+    deleteFragmentedFiles=$(
+      assertSelection "
+        Confirm permanently deleting the following file${pluralFile} from disk!
+        ${redBoldText}${filesToDelete}${reset}
+        Yes
+        No
+      " --header-lines "$((filesCount + 1))"
     )
 
-    fragmentedFilesList=$(grep -Ff <(find -- *.mp4) <<<"${fragmentedFiles}")
-
-    if [[ ${fragmentedFilesList} ]]; then
-      echo
-      assertTask 'Listing fragmented files...'
-
+    if [[ ${deleteFragmentedFiles} == Yes ]]; then
       while IFS= read -r file; do
-        assertMissing "${file}"
-      done <<<"${fragmentedFilesList}"
+        rm -f -- "${PWD}/${file}" 2>/dev/null
 
-      echo
-      assertTask 'Deleting fragmented files from disk...'
+        if [[ ! -f ${file} ]]; then
+          assertSuccess 'Deleted:' "${file}"
+        else
+          assertMissing 'Could not delete:' "${file}"
+        fi
 
-      deleteFragmentedFiles=$(
-        assertSelection '
-          Confirm permanently deleting fragmented files from disk!
-          Yes
-          No
-        ' --header-lines 1
-      )
-
-      if [[ ${deleteFragmentedFiles} == Yes ]]; then
-        while IFS= read -r file; do
-          rm -f -- "${PWD}/${file/$'\r'/}"
-
-          if ! find "${file/$'\r'/}" &>/dev/null; then
-            assertSuccess 'Deleted:' "${file}"
-          else
-            assertMissing 'Could not delete:' "${file}"
-          fi
-
-        done <<<"${fragmentedFilesList}"
-      else
-        assertMissing 'Canceled by user'
-      fi
-
-      echo
-      assertTask 'Removing fragmented video-IDs from archive...'
-
-      fragmentedIDs=$(
-        # shellcheck disable=SC2016
-        videoIDs '/^\[crunchyroll\]/{a=$0}/'"${errPatterns}"'/{print a"\n"$0}'
-      )
-
-      if [[ ${fragmentedIDs} ]]; then
-        assertSuccess 'Backup:' "$(cp -v "${archivePath/#$HOME/\~}"{,.bak})"
-
-        while IFS= read -r id; do
-          sed -ni '' "/^${id}$/!p" "${archivePath}"
-          if ! grep -qxF "${id}" "${archivePath}"; then
-            assertSuccess 'Removed ID:' "${id}"
-          else
-            assertMissing 'Could not remove ID:' "${id}"
-          fi
-        done <<<"${fragmentedIDs}"
-
-      else
-        assertError 'Could not parse fragmented video-IDs'
-      fi
-
+      done <<<"${filesToDelete}"
+    else
+      while IFS= read -r file; do
+        assertMissing 'Fragmented file:' "${file}"
+      done <<<"${filesToDelete}"
     fi
-  fi
 
-  if [[ ${ISO_SUB} != 0 ]]; then
     echo
-    assertTask 'Renaming subtitles to ISO 639-1 code format...'
-    if ! for file in *[A-Z][A-Z].ass; do
-      mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass"
-    done 2>/dev/null; then
-      assertMissing "No matching subtitle that require renaming was found\n"
+    assertTask 'Removing fragmented video-ID from archive...'
+    fragmentedID=$(getVideoID "${errPatterns}")
+
+    if [[ ${fragmentedID} ]]; then
+      if grep -qxF "${fragmentedID}" "${archivePath}"; then
+        assertSuccess 'Backup:' "$(cp -v -- "${archivePath/#$HOME/\~}"{,.bak})"
+        sed -ni '' "/^${fragmentedID}$/!p" "${archivePath}"
+
+        if ! grep -qxF "${fragmentedID}" "${archivePath}"; then
+          assertSuccess 'Removed ID:' "${fragmentedID}"
+        else
+          assertMissing 'Could not remove ID:' "${fragmentedID}"
+        fi
+
+      else
+        assertSuccess 'No fragemented video-IDs found in archive'
+      fi
+    else
+      assertError 'Could not parse fragmented video-IDs'
     fi
+
+  else
+    assertMissing 'Canceled by user'
   fi
+}
+
+youtubeDl() {
+  script -q "${DL_LOG}" youtube-dl "${seriesURL}" --config-location <(
+    cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "$1" 2>/dev/null
+  ) --download-archive "${archivePath}" "${@:2}"
 }
 
 download() {
@@ -979,40 +1015,42 @@ download() {
     assertSuccess 'Download directory:' "${PWD/#$HOME/\~}\n"
   fi
 
+  #* Keep the following archive variables here.
+  #* They must refer to the active directory
   archivePath="${ARCHIVE_PATH:-${PWD}/archive.txt}"
   archiveDir="$(dirname "${archivePath}")"
+  archiveExtra="${archivePath%.txt}-extra.txt"
+  # --***-- #
 
-  archiveAssertion() {
-    if [[ -w ${archiveDir} ]]; then
-      if grep -qE '.txt$' <<<"${archivePath}"; then
-        assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
-      else
-        assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
-        assertError "Download archive file extension must be '.txt'"
-        exit 1
-      fi
+  assertTask 'Downloading with youtube-dl...'
+  assertSuccess 'Download log file:' "${DL_LOG/#$HOME/\~}"
+
+  if [[ -w ${archiveDir} ]]; then
+    if grep -q '.txt$' <<<"${archivePath}"; then
+      assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
     else
       assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
-      assertError 'Invalid download archive path.' \
-        'Make sure to set a valid path with writting permission!!!'
+      assertError "Download archive file extension must be '.txt'"
       exit 1
     fi
-  }
-
-  if [[ -s ${confFile} ]]; then
-    assertTask 'Downloading with custom youtube-dl config file...'
-    archiveAssertion
-    downloadPostProcess youtube-dl "${seriesURL}" --config-location <(
-      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" 2>/dev/null
-    ) --download-archive "${archivePath}" "$@"
-
   else
-    assertTask 'Downloading with youtube-dl...'
-    archiveAssertion
-    downloadPostProcess youtube-dl "${seriesURL}" --config-location <(
-      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
-    ) --download-archive "${archivePath}" "$@"
+    assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
+    assertError 'Invalid download archive path.' \
+      'Make sure to set a valid path with writting permission!!!'
+    exit 1
   fi
+
+  youtubeDl "${confFile}" "$@" &
+  youtubeDLPID=$!
+
+  renameSubtitles &
+  renameSubtitlesPID=$!
+
+  fragmentMonitor &
+  fragmentMonitorPID=$!
+
+  wait "${youtubeDLPID}" "${renameSubtitlesPID}" "${fragmentMonitorPID}"
+  archiveVideoID
 }
 
 downloadOrStream() {
