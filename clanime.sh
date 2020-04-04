@@ -101,7 +101,7 @@ assertError() {
 }
 
 trimWhiteSpace() {
-  echo -e "$1" | grep "\S" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+  echo -e "$1" | grep '\S' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
 assertSelection() {
@@ -164,7 +164,7 @@ selectModifiers() {
 
     assertError 'No modifier selected!'
     assertTryAgain selectModifiers "$@"
-  elif grep -qE '^--playlist-items' <<<"${playlistModifier}" &&
+  elif grep -q '^--playlist-items' <<<"${playlistModifier}" &&
     grep -qE '^--playlist-(start|end)' <<<"${playlistModifier}"; then
     assertError 'Do not use --playlist-item with --playlist-(start|end)'
     assertTryAgain selectModifiers "$@"
@@ -427,7 +427,7 @@ customizeConfigFile() {
   fi
 
   ytdlConfOptions
-  if grep -qE '^--format' <<<"${configOptions}"; then
+  if grep -q '^--format' <<<"${configOptions}"; then
     assertTask 'Awaiting user selection for format filter...'
     playlistFilter
     if [[ ${format} != best ]]; then
@@ -439,7 +439,7 @@ customizeConfigFile() {
     fi
   fi
 
-  if grep -qE '^--playlist' <<<"${configOptions}"; then
+  if grep -q '^--playlist' <<<"${configOptions}"; then
     assertTask 'Finding local playlist index...'
     playlistIndexQuery="${CONFIG_DIR}/playlist-index/*${seriesTitle}*"
     if compgen -G "${playlistIndexQuery}" >/dev/null; then
@@ -472,7 +472,7 @@ customizeConfigFile() {
     playlistSelection
   fi
 
-  if grep -qE '^--output' <<<"${configOptions}"; then
+  if grep -q '^--output' <<<"${configOptions}"; then
     assertTask 'Awaiting user selection for output template...'
     outputTemplate
   fi
@@ -643,7 +643,7 @@ createSeriesList() {
 }
 
 addToWatchList() {
-  if ! grep -q "${seriesTitle}" "${LIST_JSON}" 2>/dev/null; then
+  if ! grep -qF "${seriesTitle}" "${LIST_JSON}" 2>/dev/null; then
     confirmAddToWatchList=$(
       assertSelection '
       Do you want to add this series to watching list?
@@ -771,7 +771,7 @@ stream() {
     assertSuccess 'MPV config file:' "${mpvConf/#$HOME/\~}\n"
   fi
 
-  if ! grep -q '\[crunchyroll\]' "${mpvConf}"; then
+  if ! grep -qF '[crunchyroll]' "${mpvConf}"; then
     assertMissing "Crunchyroll profile was not found in MPV config file\n"
     assertTask 'Appending example Crunchyroll profile to MPV config file...'
 
