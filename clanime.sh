@@ -37,6 +37,9 @@ OUTPUT_TEMPLATE="${ANIME_OUTPUT_TEMPLATE}"
 ## Renaming subtitles to ISO 639-1 code format option
 ISO_SUB="${ANIME_ISO_SUB}"
 
+## Auto delete fragmented files option
+DELETE_FRAG="${ANIME_DELETE_FRAG}"
+
 #* End of Settings *#
 
 baseURL='https://www.crunchyroll.com'
@@ -915,11 +918,15 @@ fragmentMonitor() {
       tr -d '\r'
   )
 
-  local header='Found more than one file. Select one or more files to delete...'
-  filesToDelete=$(
-    find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null |
-      fzf -m --header "${header}"
-  )
+  if [[ ${DELETE_FRAG} != 0 ]]; then
+    filesToDelete=$(find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null)
+  else
+    local header='Found more than one file. Select one or more files to delete:'
+    filesToDelete=$(
+      find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null |
+        fzf -m --header "${header}"
+    )
+  fi
 
   if [[ ${filesToDelete} ]]; then
     assertError "Fragment error detected! Download terminated."
@@ -936,7 +943,7 @@ fragmentMonitor() {
 
     filesCount=$(wc -l <<<"${filesToDelete}")
 
-    deleteFragmentedFiles=$(
+    [[ ${DELETE_FRAG} == 0 ]] && deleteFragmentedFiles=$(
       assertSelection "
         Confirm permanently deleting the following file${pluralFile} from disk!
         ${redBoldText}${filesToDelete}${reset}
@@ -945,7 +952,7 @@ fragmentMonitor() {
       " --header-lines "$((filesCount + 1))"
     )
 
-    if [[ ${deleteFragmentedFiles} == Yes ]]; then
+    if [[ ${deleteFragmentedFiles} == Yes || ${DELETE_FRAG} != 0 ]]; then
       while IFS= read -r file; do
         rm -f -- "${PWD}/${file}" 2>/dev/null
 
