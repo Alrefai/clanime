@@ -1047,17 +1047,43 @@ download() {
     exit 1
   fi
 
-  youtubeDl "${confFile}" "$@" &
-  youtubeDLPID=$!
+  for retry in {1..11}; do
+    youtubeDl "${confFile}" "$@" &
+    youtubeDLPID=$!
 
-  renameSubtitles &
-  renameSubtitlesPID=$!
+    renameSubtitles &
+    renameSubtitlesPID=$!
 
-  fragmentMonitor &
-  fragmentMonitorPID=$!
+    fragmentMonitor
+    wait "${youtubeDLPID}" "${renameSubtitlesPID}"
+    archiveVideoID
+    [[ ! ${fragmentedDownload} ]] && break
+    fragmentedDownload=''
 
-  wait "${youtubeDLPID}" "${renameSubtitlesPID}" "${fragmentMonitorPID}"
-  archiveVideoID
+    if [[ ${retry} -gt 10 ]]; then
+      assertError 'Maximum retry attempts reached. Try again later!'
+      exit 1
+    fi
+
+    echo
+    assertTask "Retrying attempt ${retry} of 10..."
+
+    for second in {15..2}; do
+      echo -ne \
+        "${cyanText}[${magentaBoldText}" \
+        'sleeping' \
+        "${cyanText}]${reset}" \
+        "${second} seconds... \r"
+      sleep 1
+    done
+
+    echo -ne \
+      "${cyanText}[${magentaBoldText}" \
+      'sleeping' \
+      "${cyanText}]${reset}" \
+      "1 second... \r"
+    sleep 1
+  done
 }
 
 downloadOrStream() {
