@@ -44,10 +44,7 @@ DELETE_FRAG="${ANIME_DELETE_FRAG}"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
-
 seasonQuery='[href^="#/videos/anime/seasons/"]::attr(title)'
-playlistQuery='a.portrait-element::attr(href)'
-titlesQuery='a.portrait-element > span > img::attr(alt)'
 
 # Font styling and colors
 boldText=$'\e[1m'
@@ -71,6 +68,11 @@ FZF_DEFAULT_OPTS="
   --min-height 15 \
   --border \
   --select-1"
+
+query() {
+  playlistQuery="a.$1::attr(href)"
+  titlesQuery="a.$1::attr(title)"
+}
 
 assertTask() {
   echo -e "${blueText}==>${reset} ${boldText}$*${reset}"
@@ -693,7 +695,6 @@ processSeriesList() {
 }
 
 processSeriesOptions() {
-  seriesListBaseURL="${mainURL}/${1,,}"
   assertTask "Fetching ${1,,} list from crunchyroll.com..."
 
   if [[ $1 == Seasons ]]; then
@@ -702,10 +703,15 @@ processSeriesOptions() {
     )
 
     [[ ${mainHtmlDoc} ]] || exit 1
+    seriesListBaseURL="${mainURL}/${1,,}"
+    query 'portrait-element'
     selectSeason
-
+  elif [[ $1 == Alphabetical ]]; then
+    seriesListURL="${mainURL}/alpha?group=all"
+    query 'ellipsis'
   else
-    seriesListURL="${seriesListBaseURL}"
+    seriesListURL="${mainURL}/${1,,}"
+    query 'portrait-element'
   fi
 
   processSeriesList "$1"
@@ -1162,6 +1168,7 @@ browsingList="
   Popular List
   Simulcasts List
   Updated List
+  Alphabetical List
   Seasons List
 "
 
