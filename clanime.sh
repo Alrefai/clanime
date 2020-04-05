@@ -10,6 +10,7 @@ CONFIG_DIR=${CONFIG_HOME}/clanime
 USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
 LIST_JSON="${CONFIG_DIR}/list.json"
+DL_LOG="${CACHE_DIR}/download-log.txt"
 
 ## Download archive path option
 ARCHIVE_PATH="${ANIME_DOWNLOAD_ARCHIVE}"
@@ -35,6 +36,9 @@ OUTPUT_TEMPLATE="${ANIME_OUTPUT_TEMPLATE}"
 
 ## Renaming subtitles to ISO 639-1 code format option
 ISO_SUB="${ANIME_ISO_SUB}"
+
+## Auto delete fragmented files option
+DELETE_FRAG="${ANIME_DELETE_FRAG}"
 
 #* End of Settings *#
 
@@ -97,7 +101,7 @@ assertError() {
 }
 
 trimWhiteSpace() {
-  echo -e "$1" | grep "\S" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+  echo -e "$1" | grep '\S' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
 assertSelection() {
@@ -146,6 +150,10 @@ readPrompt() {
     -i "${suffix}" textInput
 }
 
+isPlural() {
+  test "$(wc -l <<<"$1")" -gt 1 && echo s
+}
+
 selectModifiers() {
   if ! playlistModifier=$(
     assertSelection "
@@ -156,7 +164,7 @@ selectModifiers() {
 
     assertError 'No modifier selected!'
     assertTryAgain selectModifiers "$@"
-  elif grep -qE '^--playlist-items' <<<"${playlistModifier}" &&
+  elif grep -q '^--playlist-items' <<<"${playlistModifier}" &&
     grep -qE '^--playlist-(start|end)' <<<"${playlistModifier}"; then
     assertError 'Do not use --playlist-item with --playlist-(start|end)'
     assertTryAgain selectModifiers "$@"
@@ -419,7 +427,7 @@ customizeConfigFile() {
   fi
 
   ytdlConfOptions
-  if grep -qE '^--format' <<<"${configOptions}"; then
+  if grep -q '^--format' <<<"${configOptions}"; then
     assertTask 'Awaiting user selection for format filter...'
     playlistFilter
     if [[ ${format} != best ]]; then
@@ -431,7 +439,7 @@ customizeConfigFile() {
     fi
   fi
 
-  if grep -qE '^--playlist' <<<"${configOptions}"; then
+  if grep -q '^--playlist' <<<"${configOptions}"; then
     assertTask 'Finding local playlist index...'
     playlistIndexQuery="${CONFIG_DIR}/playlist-index/*${seriesTitle}*"
     if compgen -G "${playlistIndexQuery}" >/dev/null; then
@@ -464,7 +472,7 @@ customizeConfigFile() {
     playlistSelection
   fi
 
-  if grep -qE '^--output' <<<"${configOptions}"; then
+  if grep -q '^--output' <<<"${configOptions}"; then
     assertTask 'Awaiting user selection for output template...'
     outputTemplate
   fi
@@ -622,10 +630,7 @@ createSeriesList() {
     hxclean <<<"${playlistHtmlDoc}" |
       hxselect -s '\n' -c "${titlesQuery}" 2>/dev/null |
       safeFilename |
-      sed "s/&#039_/'/g" |
-      sed "s/&amp_/\&/g" |
-      sed "s/  / /g" |
-      sed "s/[[:space:]]*$//"
+      sed "s/&#039_/'/g;s/&amp_/\&/g;s/&quot//g;s/  / /g;s/[[:space:]]*$//"
   )
 
   if [[ ! ${seriesTitles} ]]; then
@@ -635,7 +640,7 @@ createSeriesList() {
 }
 
 addToWatchList() {
-  if ! grep -q "${seriesTitle}" "${LIST_JSON}" 2>/dev/null; then
+  if ! grep -qF "${seriesTitle}" "${LIST_JSON}" 2>/dev/null; then
     confirmAddToWatchList=$(
       assertSelection '
       Do you want to add this series to watching list?
@@ -763,7 +768,7 @@ stream() {
     assertSuccess 'MPV config file:' "${mpvConf/#$HOME/\~}\n"
   fi
 
-  if ! grep -q '\[crunchyroll\]' "${mpvConf}"; then
+  if ! grep -qF '[crunchyroll]' "${mpvConf}"; then
     assertMissing "Crunchyroll profile was not found in MPV config file\n"
     assertTask 'Appending example Crunchyroll profile to MPV config file...'
 
@@ -827,27 +832,21 @@ processStream() {
   fi
 }
 
-downloadPostProcess() {
-  downloadLog="${CACHE_DIR}/download-log.txt"
-  archiveExtra="${archivePath%.txt}-extra.txt"
+getVideoID() {
+  # shellcheck disable=SC2016
+  local pattern='/^\[crunchyroll\]/{a=$0}/'"${*:-1}"'/{print a"\n"$0}'
+  awk "${@:1:$#-1}" "${pattern}" "${DL_LOG}" |
+    grep -F '[crunchyroll]' |
+    awk '{print $1, $2}' |
+    sed 's/[][]//g;s/://' |
+    uniq # Don't use `sort` command. It breaks renameSubtitles function for reversed playlist
+}
 
-  if script -q "${downloadLog}" "${@}" || [[ $? == 1 ]]; then
-    assertSuccess 'Download log file:' "${downloadLog/#$HOME/\~}"
-  else
-    assertMissing "Saving download log to file was interrupted"
-  fi
-
-  if grep -q 'requested format not available' "${downloadLog}"; then
+archiveVideoID() {
+  if grep -qF 'requested format not available' "${DL_LOG}"; then
     echo
     assertTask 'Adding video-IDs with no matching format to archive...'
-    formatNotAvailableIDs=$(
-      awk '/^\[crunchyroll\]/{a=$0}/format not available/{print a"\n"$0}' \
-        "${downloadLog}" |
-        grep '\[crunchyroll\]' |
-        awk '{print $1, $2}' |
-        sed 's/[][]//g' |
-        sed 's/:$//'
-    )
+    formatNotAvailableIDs=$(getVideoID 'format not available')
 
     if [[ ${formatNotAvailableIDs} ]]; then
       echo "${formatNotAvailableIDs}" >>"${archiveExtra}" &&
@@ -860,16 +859,144 @@ downloadPostProcess() {
     fi
 
   fi
+}
 
+renameSubtitles() {
   if [[ ${ISO_SUB} != 0 ]]; then
-    echo
-    assertTask 'Renaming subtitles to ISO 639-1 code format...'
-    if ! for file in *[A-Z][A-Z].ass; do
-      mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass"
-    done 2>/dev/null; then
-      assertMissing "No matching subtitle that require renaming was found\n"
-    fi
+    while pgrep -qf "youtube-dl ${seriesURL}"; do
+      sleep 10
+      lastVideoID=$(getVideoID '[Vv]ideo subtitle' | sed '$!d')
+      [[ ${lastVideoID} != "${videoID:-}" ]] || continue
+      sleep 2
+
+      for file in *[A-Z][A-Z].ass; do
+        echo \
+          "${cyanText}[${magentaBoldText}" \
+          "rename subtitle to ISO 639-1" \
+          "${cyanText}]${reset}" \
+          "$(mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass")"
+      done 2>/dev/null && videoID="${lastVideoID}"
+    done
   fi
+}
+
+fragmentMonitor() {
+  errPatternsList='
+    Error in the pull function
+    PES packet size mismatch
+    Failed to open segment
+    Unable to open resource
+  '
+
+  errPatterns=$(trimWhiteSpace "${errPatternsList}" | paste -sd '|' -)
+
+  until grep -qE "${errPatterns}" "${DL_LOG}"; do
+    sleep 1
+    if ! pgrep -qf "youtube-dl ${seriesURL}"; then
+      #! This check is important!
+      # In case youtube-dl was terminated before an error pattern was catched.
+      grep -qE "${errPatterns}" "${DL_LOG}" && break
+      return
+    fi
+  done
+
+  pkill -f "youtube-dl ${seriesURL}"
+  sleep 2
+  kill "${youtubeDLPID}" &>/dev/null
+  sleep 3
+
+  fragmentedDownload=$(
+    awk \
+      '/^\[download\] Destination/{a=$0}/'"${errPatterns}"'/{print a"\n"$0}' \
+      "${DL_LOG}" |
+      grep -F '[download] Destination' |
+      awk -F ': ' '{print $2}' |
+      sort --unique |
+      tr -d '\r'
+  )
+
+  if [[ ${DELETE_FRAG} != 0 ]]; then
+    filesToDelete=$(find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null)
+  else
+    local header='Found more than one file. Select one or more files to delete:'
+    filesToDelete=$(
+      find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null |
+        fzf -m --header "${header}"
+    )
+  fi
+
+  if [[ ${filesToDelete} ]]; then
+    assertError "Fragment error detected! Download terminated."
+    echo
+    pluralFile=$(isPlural "${filesToDelete}")
+    assertTask "Deleting fragmented file${pluralFile} from disk..."
+    foundPattern=$(grep -oE "${errPatterns}" "${DL_LOG}" | sort --unique)
+
+    if [[ ${foundPattern} ]]; then
+      while IFS= read -r pattern; do
+        assertMissing 'Detected error:' "${pattern}"
+      done <<<"${foundPattern}"
+    fi
+
+    filesCount=$(wc -l <<<"${filesToDelete}")
+
+    [[ ${DELETE_FRAG} == 0 ]] && deleteFragmentedFiles=$(
+      assertSelection "
+        Confirm permanently deleting the following file${pluralFile} from disk!
+        ${redBoldText}${filesToDelete}${reset}
+        Yes
+        No
+      " --header-lines "$((filesCount + 1))"
+    )
+
+    if [[ ${deleteFragmentedFiles} == Yes || ${DELETE_FRAG} != 0 ]]; then
+      while IFS= read -r file; do
+        rm -f -- "${PWD}/${file}" 2>/dev/null
+
+        if [[ ! -f ${file} ]]; then
+          assertSuccess 'Deleted:' "${file}"
+        else
+          assertMissing 'Could not delete:' "${file}"
+        fi
+
+      done <<<"${filesToDelete}"
+    else
+      while IFS= read -r file; do
+        assertMissing 'Fragmented file:' "${file}"
+      done <<<"${filesToDelete}"
+    fi
+
+    echo
+    assertTask 'Removing fragmented video-ID from archive...'
+    fragmentedID=$(getVideoID "${errPatterns}")
+
+    if [[ ${fragmentedID} ]]; then
+      if grep -qxF "${fragmentedID}" "${archivePath}"; then
+        assertSuccess 'Backup:' "$(cp -v -- "${archivePath/#$HOME/\~}"{,.bak})"
+        sed -ni '' "/^${fragmentedID}$/!p" "${archivePath}"
+
+        if ! grep -qxF "${fragmentedID}" "${archivePath}"; then
+          assertSuccess 'Removed ID:' "${fragmentedID}"
+        else
+          assertMissing 'Could not remove ID:' "${fragmentedID}"
+        fi
+
+      else
+        assertSuccess 'No fragemented video-IDs found in archive'
+      fi
+    else
+      assertError 'Could not parse fragmented video-IDs'
+    fi
+
+  else
+    assertMissing 'Canceled by user'
+  fi
+}
+
+youtubeDl() {
+  script -q "${DL_LOG}" youtube-dl "${seriesURL}" --config-location <(
+    cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "$1" 2>/dev/null
+  ) --download-archive "${archivePath}" "${@:2}"
 }
 
 download() {
@@ -892,40 +1019,68 @@ download() {
     assertSuccess 'Download directory:' "${PWD/#$HOME/\~}\n"
   fi
 
+  #* Keep the following archive variables here.
+  #* They must refer to the active directory
   archivePath="${ARCHIVE_PATH:-${PWD}/archive.txt}"
   archiveDir="$(dirname "${archivePath}")"
+  archiveExtra="${archivePath%.txt}-extra.txt"
+  # --***-- #
 
-  archiveAssertion() {
-    if [[ -w ${archiveDir} ]]; then
-      if grep -qE '.txt$' <<<"${archivePath}"; then
-        assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
-      else
-        assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
-        assertError "Download archive file extension must be '.txt'"
-        exit 1
-      fi
+  assertTask 'Downloading with youtube-dl...'
+  assertSuccess 'Download log file:' "${DL_LOG/#$HOME/\~}"
+
+  if [[ -w ${archiveDir} ]]; then
+    if grep -q '.txt$' <<<"${archivePath}"; then
+      assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
     else
       assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
-      assertError 'Invalid download archive path.' \
-        'Make sure to set a valid path with writting permission!!!'
+      assertError "Download archive file extension must be '.txt'"
       exit 1
     fi
-  }
-
-  if [[ -s ${confFile} ]]; then
-    assertTask 'Downloading with custom youtube-dl config file...'
-    archiveAssertion
-    downloadPostProcess youtube-dl "${seriesURL}" --config-location <(
-      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" 2>/dev/null
-    ) --download-archive "${archivePath}" "$@"
-
   else
-    assertTask 'Downloading with youtube-dl...'
-    archiveAssertion
-    downloadPostProcess youtube-dl "${seriesURL}" --config-location <(
-      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
-    ) --download-archive "${archivePath}" "$@"
+    assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
+    assertError 'Invalid download archive path.' \
+      'Make sure to set a valid path with writting permission!!!'
+    exit 1
   fi
+
+  for retry in {1..11}; do
+    youtubeDl "${confFile}" "$@" &
+    youtubeDLPID=$!
+
+    renameSubtitles &
+    renameSubtitlesPID=$!
+
+    fragmentMonitor
+    wait "${youtubeDLPID}" "${renameSubtitlesPID}"
+    archiveVideoID
+    [[ ! ${fragmentedDownload} ]] && break
+    fragmentedDownload=''
+
+    if [[ ${retry} -gt 10 ]]; then
+      assertError 'Maximum retry attempts reached. Try again later!'
+      exit 1
+    fi
+
+    echo
+    assertTask "Retrying attempt ${retry} of 10..."
+
+    for second in {15..2}; do
+      echo -ne \
+        "${cyanText}[${magentaBoldText}" \
+        'sleeping' \
+        "${cyanText}]${reset}" \
+        "${second} seconds... \r"
+      sleep 1
+    done
+
+    echo -ne \
+      "${cyanText}[${magentaBoldText}" \
+      'sleeping' \
+      "${cyanText}]${reset}" \
+      "1 second... \r"
+    sleep 1
+  done
 }
 
 downloadOrStream() {
