@@ -630,10 +630,7 @@ createSeriesList() {
     hxclean <<<"${playlistHtmlDoc}" |
       hxselect -s '\n' -c "${titlesQuery}" 2>/dev/null |
       safeFilename |
-      sed "s/&#039_/'/g" |
-      sed "s/&amp_/\&/g" |
-      sed "s/  / /g" |
-      sed "s/[[:space:]]*$//"
+      sed "s/&#039_/'/g;s/&amp_/\&/g;s/&quot//g;s/  / /g;s/[[:space:]]*$//"
   )
 
   if [[ ! ${seriesTitles} ]]; then
