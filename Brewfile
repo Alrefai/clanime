@@ -1,6 +1,5 @@
 brew "bash"
-brew "wget"
-brew "html-xml-utils"
+brew "pup"
 brew "fzf"
 brew "jq"
 brew "youtube-dl"

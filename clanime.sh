@@ -44,7 +44,7 @@ DELETE_FRAG="${ANIME_DELETE_FRAG}"
 
 baseURL='https://www.crunchyroll.com'
 mainURL="${baseURL}/videos/anime"
-seasonQuery='[href^="#/videos/anime/seasons/"]::attr(title)'
+seasonQuery='[href^="#/videos/anime/seasons/"] attr{title}'
 
 # Font styling and colors
 boldText=$'\e[1m'
@@ -70,8 +70,8 @@ FZF_DEFAULT_OPTS="
   --select-1"
 
 query() {
-  playlistQuery="a.$1::attr(href)"
-  titlesQuery="a.$1::attr(title)"
+  playlistQuery="a.$1 attr{href}"
+  titlesQuery="a.$1 attr{title}"
 }
 
 assertTask() {
@@ -124,10 +124,6 @@ assertTryAgain() {
     assertError 'Aborted by user'
     exit 1
   fi
-}
-
-downloadPage() {
-  wget -qO- "$1" --max-redirect 0 --level 1
 }
 
 safeFilename() {
@@ -613,11 +609,10 @@ selectSeries() {
 }
 
 createSeriesList() {
-  playlistHtmlDoc=$(downloadPage "${seriesListURL}")
+  playlistHtmlDoc=$(curl -s "${seriesListURL}")
 
   seriesList=$(
-    hxclean <<<"${playlistHtmlDoc}" 2>/dev/null |
-      hxselect -s '\n' -c "${playlistQuery}" 2>/dev/null |
+    pup --plain --charset UTF8 "${playlistQuery}" <<<"${playlistHtmlDoc}" |
       awk -v baseURL=${baseURL} '{print baseURL$0}'
   )
 
@@ -629,8 +624,7 @@ createSeriesList() {
   fi
 
   seriesTitles=$(
-    hxclean <<<"${playlistHtmlDoc}" 2>/dev/null |
-      hxselect -s '\n' -c "${titlesQuery}" 2>/dev/null |
+    pup --plain --charset UTF8 "${titlesQuery}" <<<"${playlistHtmlDoc}" |
       safeFilename |
       sed "s/&#039_/'/g;s/&amp_/\&/g;s/&quot//g;s/  / /g;s/[[:space:]]*$//"
   )
@@ -672,8 +666,7 @@ addToWatchList() {
 selectSeason() {
   assertTask 'Awaiting user selection from seasons list...'
   season=$(
-    hxclean <<<"${mainHtmlDoc}" 2>/dev/null |
-      hxselect -s '\n' -c "${seasonQuery}" 2>/dev/null |
+    pup --plain --charset UTF8 "${seasonQuery}" <<<"${mainHtmlDoc}" |
       awk '{print tolower($1"-"$2)}' |
       fzf
   )
@@ -699,7 +692,7 @@ processSeriesOptions() {
 
   if [[ $1 == Seasons ]]; then
     mainHtmlDoc=$(
-      downloadPage ${mainURL} || assertError 'Failed to download HTML document'
+      curl -s ${mainURL} || assertError 'Failed to download HTML document'
     )
 
     [[ ${mainHtmlDoc} ]] || exit 1
