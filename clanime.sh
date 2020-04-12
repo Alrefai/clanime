@@ -672,7 +672,7 @@ addToWatchList() {
 selectSeason() {
   assertTask 'Awaiting user selection from seasons list...'
   season=$(
-    hxclean <<<"${mainHtmlDoc}" |
+    hxclean <<<"${mainHtmlDoc}" 2>/dev/null |
       hxselect -s '\n' -c "${seasonQuery}" 2>/dev/null |
       awk '{print tolower($1"-"$2)}' |
       fzf
