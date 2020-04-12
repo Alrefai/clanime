@@ -616,7 +616,7 @@ createSeriesList() {
   playlistHtmlDoc=$(downloadPage "${seriesListURL}")
 
   seriesList=$(
-    hxclean <<<"${playlistHtmlDoc}" |
+    hxclean <<<"${playlistHtmlDoc}" 2>/dev/null |
       hxselect -s '\n' -c "${playlistQuery}" 2>/dev/null |
       awk -v baseURL=${baseURL} '{print baseURL$0}'
   )
@@ -629,7 +629,7 @@ createSeriesList() {
   fi
 
   seriesTitles=$(
-    hxclean <<<"${playlistHtmlDoc}" |
+    hxclean <<<"${playlistHtmlDoc}" 2>/dev/null |
       hxselect -s '\n' -c "${titlesQuery}" 2>/dev/null |
       safeFilename |
       sed "s/&#039_/'/g;s/&amp_/\&/g;s/&quot//g;s/  / /g;s/[[:space:]]*$//"
