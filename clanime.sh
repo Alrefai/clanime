@@ -126,10 +126,6 @@ assertTryAgain() {
   fi
 }
 
-downloadPage() {
-  wget -qO- "$1" --max-redirect 0 --level 1
-}
-
 safeFilename() {
   beSafe='
     s/^\W+|(?!
@@ -613,7 +609,7 @@ selectSeries() {
 }
 
 createSeriesList() {
-  playlistHtmlDoc=$(downloadPage "${seriesListURL}")
+  playlistHtmlDoc=$(curl -s "${seriesListURL}")
 
   seriesList=$(
     pup --plain --charset UTF8 "${playlistQuery}" <<<"${playlistHtmlDoc}" |
@@ -696,7 +692,7 @@ processSeriesOptions() {
 
   if [[ $1 == Seasons ]]; then
     mainHtmlDoc=$(
-      downloadPage ${mainURL} || assertError 'Failed to download HTML document'
+      curl -s ${mainURL} || assertError 'Failed to download HTML document'
     )
 
     [[ ${mainHtmlDoc} ]] || exit 1

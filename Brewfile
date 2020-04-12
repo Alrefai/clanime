@@ -1,5 +1,4 @@
 brew "bash"
-brew "wget"
 brew "pup"
 brew "fzf"
 brew "jq"
