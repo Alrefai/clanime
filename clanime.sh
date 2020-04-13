@@ -612,7 +612,7 @@ createSeriesList() {
   playlistHtmlDoc=$(curl -s "${seriesListURL}")
 
   seriesList=$(
-    pup --plain --charset UTF8 "${playlistQuery}" <<<"${playlistHtmlDoc}" |
+    pup --plain --charset UTF-8 "${playlistQuery}" <<<"${playlistHtmlDoc}" |
       awk -v baseURL=${baseURL} '{print baseURL$0}'
   )
 
@@ -624,7 +624,7 @@ createSeriesList() {
   fi
 
   seriesTitles=$(
-    pup --plain --charset UTF8 "${titlesQuery}" <<<"${playlistHtmlDoc}" |
+    pup --plain --charset UTF-8 "${titlesQuery}" <<<"${playlistHtmlDoc}" |
       safeFilename
   )
 
@@ -665,7 +665,7 @@ addToWatchList() {
 selectSeason() {
   assertTask 'Awaiting user selection from seasons list...'
   season=$(
-    pup --plain --charset UTF8 "${seasonQuery}" <<<"${mainHtmlDoc}" |
+    pup --plain --charset UTF-8 "${seasonQuery}" <<<"${mainHtmlDoc}" |
       awk '{print tolower($1"-"$2)}' |
       fzf
   )
