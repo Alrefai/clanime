@@ -625,8 +625,7 @@ createSeriesList() {
 
   seriesTitles=$(
     pup --plain --charset UTF8 "${titlesQuery}" <<<"${playlistHtmlDoc}" |
-      safeFilename |
-      sed "s/&#039_/'/g;s/&amp_/\&/g;s/&quot//g;s/  / /g;s/[[:space:]]*$//"
+      safeFilename
   )
 
   if [[ ! ${seriesTitles} ]]; then
