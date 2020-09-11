@@ -1047,6 +1047,13 @@ download() {
     exit 1
   fi
 
+  [[ ! $* =~ '--autonumber-start' ]] &&
+    if grep -qF '%(autonumber)' "${confFile}"; then
+      assertError 'You are using "autonumber" in filename output.' \
+        'Pass the next episode number with "--autonumber-start" option.'
+      exit 1
+    fi
+
   for retry in {1..11}; do
     youtubeDl "${confFile}" "$@" &
     youtubeDLPID=$!
