@@ -888,6 +888,7 @@ fragmentMonitor() {
     PES packet size mismatch
     Failed to open segment
     Unable to open resource
+    Packet corrupt
   '
 
   errPatterns=$(trimWhiteSpace "${errPatternsList}" | paste -sd '|' -)
