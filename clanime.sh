@@ -69,6 +69,10 @@ FZF_DEFAULT_OPTS="
   --border \
   --select-1"
 
+fetch() {
+  deno eval "console.log(await fetch('$1').then(response => response.text()))"
+}
+
 query() {
   playlistQuery="a.$1 attr{href}"
   titlesQuery="a.$1 attr{title}"
@@ -609,7 +613,7 @@ selectSeries() {
 }
 
 createSeriesList() {
-  playlistHtmlDoc=$(curl -s "${seriesListURL}")
+  playlistHtmlDoc=$(fetch "${seriesListURL}")
 
   seriesList=$(
     pup --plain --charset UTF-8 "${playlistQuery}" <<<"${playlistHtmlDoc}" |
@@ -691,7 +695,7 @@ processSeriesOptions() {
 
   if [[ $1 == Seasons ]]; then
     mainHtmlDoc=$(
-      curl -s ${mainURL} || assertError 'Failed to download HTML document'
+      fetch ${mainURL} || assertError 'Failed to download HTML document'
     )
 
     [[ ${mainHtmlDoc} ]] || exit 1
