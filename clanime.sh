@@ -1048,7 +1048,7 @@ download() {
   fi
 
   [[ ! $* =~ '--autonumber-start' ]] &&
-    if grep -qF '%(autonumber)' "${confFile}"; then
+    if grep -qF '%(autonumber)' "${confFile}" 2>/dev/null; then
       assertError 'You are using "autonumber" in filename output.' \
         'Pass the next episode number with "--autonumber-start" option.'
       exit 1
