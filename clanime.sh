@@ -22,7 +22,7 @@ ANIME_DIR="${ANIME_DIR}"
 ## Playlist index options
 PARSE_INDEX_START="${PARSE_INDEX_START:-1}"
 
-## Format filer options
+## Format filter options
 FORMAT_FILTER="${FORMAT_FILTER:-[format_id*=jaJP][format_id!*=hardsub]}"
 
 ## Output template options
@@ -76,6 +76,10 @@ fetch() {
 query() {
   playlistQuery="a.$1 attr{href}"
   titlesQuery="a.$1 attr{title}"
+}
+
+querySelector() {
+  pup --plain --charset UTF-8 "$1"
 }
 
 assertTask() {
@@ -616,7 +620,7 @@ createSeriesList() {
   playlistHtmlDoc=$(fetch "${seriesListURL}")
 
   seriesList=$(
-    pup --plain --charset UTF-8 "${playlistQuery}" <<<"${playlistHtmlDoc}" |
+    querySelector "${playlistQuery}" <<<"${playlistHtmlDoc}" |
       awk -v baseURL=${baseURL} '{print baseURL$0}'
   )
 
@@ -628,12 +632,37 @@ createSeriesList() {
   fi
 
   seriesTitles=$(
-    pup --plain --charset UTF-8 "${titlesQuery}" <<<"${playlistHtmlDoc}" |
+    querySelector "${titlesQuery}" <<<"${playlistHtmlDoc}" |
       safeFilename
   )
 
   if [[ ! ${seriesTitles} ]]; then
     assertError 'Could not parse titles from series list HTML document'
+    exit 1
+  fi
+}
+
+preSelectedSeries() {
+  local url=$1
+  local query='#showview-content-header > div.ch-left > h1 > span'
+  local queryEp='#showmedia_about_episode_num > a'
+  assertTask 'Fetching series title from crunchyroll.com...'
+  seriesHtmlDoc=$(fetch "${url}")
+  seriesTitleSelector=$(querySelector "${query} text{}" <<<"${seriesHtmlDoc}")
+
+  if [[ ${seriesTitleSelector} ]]; then
+    seriesTitle=$(safeFilename <<<"${seriesTitleSelector}")
+  else
+    seriesTitle=$(
+      querySelector "${queryEp} text{}" <<<"${seriesHtmlDoc}" | safeFilename
+    )
+  fi
+
+  if [[ ${seriesTitle} ]]; then
+    assertSuccess 'URL:' "${url}"
+    assertSuccess 'Series:' "${seriesTitle}"
+  else
+    assertError 'Could not parse title from series HTML document'
     exit 1
   fi
 }
@@ -669,7 +698,7 @@ addToWatchList() {
 selectSeason() {
   assertTask 'Awaiting user selection from seasons list...'
   season=$(
-    pup --plain --charset UTF-8 "${seasonQuery}" <<<"${mainHtmlDoc}" |
+    querySelector "${seasonQuery}" <<<"${mainHtmlDoc}" |
       awk '{print tolower($1"-"$2)}' |
       fzf
   )
@@ -834,14 +863,16 @@ processStream() {
   fi
 }
 
+# shellcheck disable=SC2016
+#! Don't replace `uniq` command with `sort`.
+#* It breaks renameSubtitles function for reversed playlist.
 getVideoID() {
-  # shellcheck disable=SC2016
   local pattern='/^\[crunchyroll\]/{a=$0}/'"${*:-1}"'/{print a"\n"$0}'
   awk "${@:1:$#-1}" "${pattern}" "${DL_LOG}" |
     grep -F '[crunchyroll]' |
     awk '{print $1, $2}' |
     sed 's/[][]//g;s/://' |
-    uniq # Don't use `sort` command. It breaks renameSubtitles function for reversed playlist
+    uniq
 }
 
 archiveVideoID() {
@@ -1094,17 +1125,17 @@ download() {
 }
 
 downloadOrStream() {
-  streamOrDownload=$(
+  streamOrDownload=${1:-$(
     assertSelection '
       Stream
       Download
     '
-  )
+  )}
 
   if [[ ${streamOrDownload} == Stream ]]; then
-    processStream "$@"
+    processStream "${@:2}"
   elif [[ ${streamOrDownload} == Download ]]; then
-    download "$@"
+    download "${@:2}"
   else
     assertTryAgain downloadOrStream "$@"
   fi
@@ -1144,10 +1175,46 @@ browse() {
 }
 
 #* --{ Main workflow }-- *#
-if [[ $1 =~ ^((--)?help|-h)$ ]]; then
-  mpv --help
-  exit
-fi
+while [[ -n $1 ]]; do
+  case "$1" in
+  st | stream)
+    if [[ ! ${subCommand} ]]; then
+      subCommand='Stream'
+    else
+      assertError 'Pass either stream (st) or download (dl) as subcommand.'
+      exit 1
+    fi
+    ;;
+
+  dl | download)
+    if [[ ! ${subCommand} ]]; then
+      subCommand='Download'
+    else
+      assertError 'Pass either stream (st) or download (dl) as subcommand.'
+      exit 1
+    fi
+    ;;
+
+  --)
+    args=("${@:2}")
+    shift
+    break
+    ;;
+
+  *)
+    if [[ $1 == ${baseURL}* ]]; then
+      seriesURL="$1"
+    elif [[ $1 == 'http'* ]]; then
+      assertError 'Invalid crunchyroll URL:' "$1"
+      exit 1
+    else
+      assertError 'Invalid option:' "$1"
+      exit 1
+    fi
+    ;;
+  esac
+  shift
+done
 
 [[ ${ANIME_DIR} ]] && if [[ ! -d ${ANIME_DIR} ]]; then
   assertMissing 'Anime home directory:' "${ANIME_DIR}"
@@ -1167,30 +1234,43 @@ if [[ ! -d ${CACHE_DIR} ]]; then
   assertSuccess 'Cache directory:' "${CACHE_DIR}\n"
 fi
 
-browsingList="
-  $([[ -s $LIST_JSON ]] && echo 'Watching List')
-  Popular List
-  Simulcasts List
-  Updated List
-  Alphabetical List
-  Seasons List
-"
-
-assertTask 'Awaiting user selection from main options...'
-main=$(
-  assertSelection "
-    ${browsingList}
-    Process Configurations ${yellowBoldText}ONLY${reset}
+if [[ ${seriesURL} ]]; then
+  main="${seriesURL}"
+else
+  browsingList="
+    $([[ -s $LIST_JSON ]] && echo 'Watching List')
+    Popular List
+    Simulcasts List
+    Updated List
+    Alphabetical List
+    Seasons List
   "
-)
+
+  assertTask 'Awaiting user selection from main options...'
+
+  main=$(
+    assertSelection "
+      ${browsingList}
+      Process Configurations ${yellowBoldText}ONLY${reset}
+    "
+  )
+fi
 
 if [[ ! ${main} ]]; then
   exit 1
+
+elif [[ ${main} == ${baseURL}* ]]; then
+  preSelectedSeries "${main}"
+  addToWatchList
+  findConfig
+  processConfig
+  downloadOrStream "${subCommand}" "${args[@]}"
+
 elif [[ ${main} != Process* ]]; then
   assertSuccess "Browse: ${main}\n"
   browse "$(awk '{print $1}' <<<"${main}")"
   processConfig
-  downloadOrStream "$@"
+  downloadOrStream "${subCommand}" "${args[@]}"
 
 else
   processOption="$(
