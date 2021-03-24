@@ -679,46 +679,20 @@ stream() {
     assertSuccess 'MPV config file:' "${mpvConf/#$HOME/\~}\n"
   fi
 
-  if ! grep -qF '[crunchyroll]' "${mpvConf}"; then
-    assertMissing "Crunchyroll profile was not found in MPV config file\n"
-    assertTask 'Appending example Crunchyroll profile to MPV config file...'
+  mpvArgs=(
+    "--ytdl-raw-options-append=config-location=$1"
+    "${@:2}"
+  )
 
-    mpvProfile="
-      [crunchyroll]
-      fs=yes
-      ytdl-format='[format_id*=jaJP][format_id!*=hardsub]'
-      ytdl-raw-options=netrc=
-      # ytdl-raw-options=cookies=${CONFIG_DIR/#$HOME/\~}/cookie.txt
-    "
-
-    trimWhiteSpace "${mpvProfile}" >>"${mpvConf}"
-    assertSuccess "Appended Crunchyroll profile to MPV config file\n"
-
-    reviewConf=$(
-      assertSelection '
-        Do you want to review or edit MPV config file?
-        Yes
-        No
-      ' --header-lines 1
-    )
-    [[ ${reviewConf} == Yes ]] && ${EDITOR:-vi} "${mpvConf}"
+  assertTask 'Processing stream with MPV...'
+  if grep -qxF '[crunchyroll]' "${mpvConf}"; then
+    assertSuccess 'Crunchyroll profile was found in MPV config file'
+    mpvArgs=('--profile=crunchyroll' "${mpvArgs[@]}")
   fi
 
-  assertSuccess "Enjoy watching high quality stream\n"
   playUnicode="${blueText}\u25B6${reset}"
   echo -e "${playUnicode} Opening '${seriesTitle}' stream..."
-
-  mpv --profile=crunchyroll "$@" -- "${seriesURL}"
-}
-
-processStream() {
-  if [[ -s ${confFile} ]]; then
-    assertTask 'Streaming with custom youtube-dl config file...'
-    stream --ytdl-raw-options=config-location="${confFile}" "$@"
-  else
-    assertTask 'Streaming with Crunchyroll profile in mpv config file...'
-    stream "$@"
-  fi
+  mpv "${mpvArgs[@]}"
 }
 
 # shellcheck disable=SC2016
@@ -990,13 +964,19 @@ downloadOrStream() {
     '
   )}
 
+  concatConf=$(mktemp -t clanime.conf)
+  cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" \
+    >"${concatConf}" 2>/dev/null
+
   if [[ ${streamOrDownload} == Stream ]]; then
-    processStream "${@:2}"
+    stream "${concatConf}" "${@:2}" -- "${seriesURL}"
   elif [[ ${streamOrDownload} == Download ]]; then
     download "${@:2}"
   else
     assertTryAgain downloadOrStream "$@"
   fi
+
+  rm -f -- "${concatConf}" 2>/dev/null
 }
 
 selectFromWatchList() {
