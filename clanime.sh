@@ -42,7 +42,6 @@ DELETE_FRAG="${ANIME_DELETE_FRAG}"
 
 #* End of Settings *#
 
-
 # Font styling and colors
 boldText=$'\e[1m'
 greenBoldText=$'\e[1;32m'
@@ -705,33 +704,11 @@ stream() {
     [[ ${reviewConf} == Yes ]] && ${EDITOR:-vi} "${mpvConf}"
   fi
 
-  command -v iina >/dev/null 2>&1 || ANIME_PLAYER=MPV
+  assertSuccess "Enjoy watching high quality stream\n"
+  playUnicode="${blueText}\u25B6${reset}"
+  echo -e "${playUnicode} Opening '${seriesTitle}' stream..."
 
-  player=${ANIME_PLAYER:-$(
-    assertSelection '
-      Choose a media player
-      IINA
-      MPV
-      Abort
-    ' --header-lines 1
-  )}
-
-  streamMessage() {
-    assertSuccess "Enjoy watching high quality stream\n"
-    playUnicode="${blueText}\u25B6${reset}"
-    echo -e "${playUnicode} Opening '${seriesTitle}' stream in ${player}..."
-  }
-
-  if [[ ${player} == IINA ]]; then
-    streamMessage
-    iina "${seriesURL}" -- --profile=crunchyroll "$@"
-  elif [[ ${player} == MPV ]]; then
-    streamMessage
-    mpv --profile=crunchyroll "$@" -- "${seriesURL}"
-  else
-    assertError 'Aborted by user'
-    exit 1
-  fi
+  mpv --profile=crunchyroll "$@" -- "${seriesURL}"
 }
 
 processStream() {
