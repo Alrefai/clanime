@@ -42,9 +42,6 @@ DELETE_FRAG="${ANIME_DELETE_FRAG}"
 
 #* End of Settings *#
 
-baseURL='https://www.crunchyroll.com'
-mainURL="${baseURL}/videos/anime"
-seasonQuery='[href^="#/videos/anime/seasons/"] attr{title}'
 
 # Font styling and colors
 boldText=$'\e[1m'
@@ -69,18 +66,7 @@ FZF_DEFAULT_OPTS="
   --border \
   --select-1"
 
-fetch() {
-  deno eval "console.log(await fetch('$1').then(response => response.text()))"
-}
-
-query() {
-  playlistQuery="a.$1 attr{href}"
-  titlesQuery="a.$1 attr{title}"
-}
-
-querySelector() {
-  pup --plain --charset UTF-8 "$1"
-}
+baseURL='https://www.crunchyroll.com'
 
 assertTask() {
   echo -e "${blueText}==>${reset} ${boldText}$*${reset}"
@@ -584,85 +570,26 @@ selectConfigFile() {
   fi
 }
 
-selectSeries() {
-  series=$(cat -n <<<"${seriesTitles}" | fzf --with-nth 2..)
-
-  if [[ ${series} ]]; then
-    seriesIndex=$(awk '{print $1}' <<<"${series}")
-    seriesTitle=$(awk -F '\t' '{print $2}' <<<"${series}")
-    seriesURL=$(sed "${seriesIndex}q;d" <<<"${seriesList}")
-    assertSuccess "Series: ${seriesTitle}"
-    assertSuccess 'URL:' "${seriesURL}"
-  else
-    assertError 'No title selected'
-    handleSeriesError=$(
-      assertSelection "
-        Try again
-        $([[ $1 == Seasons ]] && echo 'Select different season')
-        Abort
-      "
-    )
-
-    if [[ ${handleSeriesError} == Try* ]]; then
-      selectSeries "$1"
-    elif [[ ${handleSeriesError} == *season ]]; then
-      echo
-      selectSeason
-      processSeriesList "$1"
-    else
-      assertError 'Aborted by user'
-      exit 1
-    fi
-  fi
-}
-
-createSeriesList() {
-  playlistHtmlDoc=$(fetch "${seriesListURL}")
-
-  seriesList=$(
-    querySelector "${playlistQuery}" <<<"${playlistHtmlDoc}" |
-      awk -v baseURL=${baseURL} '{print baseURL$0}'
-  )
-
-  if [[ ${seriesList} ]]; then
-    assertSuccess 'Series list:' "\n${seriesList}\n"
-  else
-    assertError 'Could not parse URLs from series list HTML document'
-    exit 1
-  fi
-
-  seriesTitles=$(
-    querySelector "${titlesQuery}" <<<"${playlistHtmlDoc}" |
-      safeFilename
-  )
-
-  if [[ ! ${seriesTitles} ]]; then
-    assertError 'Could not parse titles from series list HTML document'
-    exit 1
-  fi
-}
-
 preSelectedSeries() {
-  local url=$1
-  local query='#showview-content-header > div.ch-left > h1 > span'
-  local queryEp='#showmedia_about_episode_num > a'
-  assertTask 'Fetching series title from crunchyroll.com...'
-  seriesHtmlDoc=$(fetch "${url}")
-  seriesTitleSelector=$(querySelector "${query} text{}" <<<"${seriesHtmlDoc}")
+  assertTask 'Parsing series title with youtube-dl...'
 
-  if [[ ${seriesTitleSelector} ]]; then
-    seriesTitle=$(safeFilename <<<"${seriesTitleSelector}")
-  else
-    seriesTitle=$(
-      querySelector "${queryEp} text{}" <<<"${seriesHtmlDoc}" | safeFilename
-    )
-  fi
+  seriesTitle=$(
+    youtube-dl "${seriesURL}" \
+      --config-location <(
+        cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
+      ) \
+      --dump-json \
+      --max-download 1 \
+      --all-formats \
+      --match-title '.*' \
+      --no-warnings \
+      --ignore-errors | jq -cr '.series' | safeFilename
+  )
 
   if [[ ${seriesTitle} ]]; then
-    assertSuccess 'URL:' "${url}"
     assertSuccess 'Series:' "${seriesTitle}"
   else
-    assertError 'Could not parse title from series HTML document'
+    assertError 'Could not parse series title!'
     exit 1
   fi
 }
@@ -684,63 +611,17 @@ addToWatchList() {
       jq --arg url "${seriesURL}" --arg title "${seriesTitle}" \
         '.watching += [{ $url, $title }]' <<<"${list}" >"${LIST_JSON}"
 
-      assertSuccess "Series added to watching list\n"
+      assertSuccess "Series added to watching list"
+      assertSuccess 'List path:' "${LIST_JSON}\n"
     else
       echo
       return
     fi
 
   else
-    assertSuccess "Series is in watching list\n"
+    assertSuccess "Series is in watching list"
+    assertSuccess 'List path:' "${LIST_JSON}\n"
   fi
-}
-
-selectSeason() {
-  assertTask 'Awaiting user selection from seasons list...'
-  season=$(
-    querySelector "${seasonQuery}" <<<"${mainHtmlDoc}" |
-      awk '{print tolower($1"-"$2)}' |
-      fzf
-  )
-
-  if [[ ${season} ]]; then
-    seriesListURL="${seriesListBaseURL}/${season}"
-    assertSuccess "Season: ${season^}\n"
-  else
-    assertError 'Failed to prase season'
-    exit 1
-  fi
-}
-
-processSeriesList() {
-  assertTask 'Creating series list...'
-  createSeriesList
-  assertTask 'Awaiting user selection from titles list...'
-  selectSeries "$1"
-}
-
-processSeriesOptions() {
-  assertTask "Fetching ${1,,} list from crunchyroll.com..."
-
-  if [[ $1 == Seasons ]]; then
-    mainHtmlDoc=$(
-      fetch ${mainURL} || assertError 'Failed to download HTML document'
-    )
-
-    [[ ${mainHtmlDoc} ]] || exit 1
-    seriesListBaseURL="${mainURL}/${1,,}"
-    query 'portrait-element'
-    selectSeason
-  elif [[ $1 == Alphabetical ]]; then
-    seriesListURL="${mainURL}/alpha?group=all"
-    query 'ellipsis'
-  else
-    seriesListURL="${mainURL}/${1,,}"
-    query 'portrait-element'
-  fi
-
-  processSeriesList "$1"
-  addToWatchList
 }
 
 findConfig() {
@@ -1164,11 +1045,9 @@ selectFromWatchList() {
 browse() {
   if [[ ! $1 ]]; then
     exit 1
-  elif [[ $1 == Watching ]]; then
+  else
     assertTask 'Awaiting user selection from watching list...'
     selectFromWatchList
-  else
-    processSeriesOptions "$1"
   fi
 
   findConfig
@@ -1236,16 +1115,11 @@ fi
 
 if [[ ${seriesURL} ]]; then
   main="${seriesURL}"
+elif [[ ! -s ${LIST_JSON} ]]; then
+  assertMissing 'Nothing is stored in your local list, yet!' \
+    'Provide at least one URL.'
 else
-  browsingList="
-    $([[ -s $LIST_JSON ]] && echo 'Watching List')
-    Popular List
-    Simulcasts List
-    Updated List
-    Alphabetical List
-    Seasons List
-  "
-
+  browsingList='Watching List'
   assertTask 'Awaiting user selection from main options...'
 
   main=$(
@@ -1260,7 +1134,7 @@ if [[ ! ${main} ]]; then
   exit 1
 
 elif [[ ${main} == ${baseURL}* ]]; then
-  preSelectedSeries "${main}"
+  preSelectedSeries
   addToWatchList
   findConfig
   processConfig
