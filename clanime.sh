@@ -969,7 +969,11 @@ downloadOrStream() {
     >"${concatConf}" 2>/dev/null
 
   if [[ ${streamOrDownload} == Stream ]]; then
-    stream "${concatConf}" "${@:2}" -- "${seriesURL}"
+    if [[ $* =~ '--playlist=' ]]; then
+      stream "${concatConf}" "${@:2}"
+    else
+      stream "${concatConf}" "${@:2}" -- "${seriesURL}"
+    fi
   elif [[ ${streamOrDownload} == Download ]]; then
     download "${@:2}"
   else
