@@ -927,6 +927,16 @@ download() {
     youtubeDl &
     youtubeDLPID=$!
 
+    until pgrep -qf -- 'youtube-dl' "${ytdArgs[@]}"; do
+      echo -ne \
+        "${cyanText}[${magentaBoldText}" \
+        'sleeping' \
+        "${cyanText}]${reset}" \
+        'Waiting for youtube-dl process... \r'
+      sleep 1
+      pgrep -qP "${youtubeDLPID}" || break
+    done
+
     renameSubtitles "${ytdArgs[@]}" &
     renameSubtitlesPID=$!
 
