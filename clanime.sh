@@ -728,7 +728,7 @@ archiveVideoID() {
 
 renameSubtitles() {
   if [[ ${ISO_SUB} != 0 ]]; then
-    while pgrep -qf "youtube-dl ${seriesURL}"; do
+    while pgrep -qf "youtube-dl $1"; do
       sleep 10
       lastVideoID=$(getVideoID '[Vv]ideo subtitle' | sed '$!d')
       [[ ${lastVideoID} != "${videoID:-}" ]] || continue
@@ -758,7 +758,7 @@ fragmentMonitor() {
 
   until grep -qE "${errPatterns}" "${DL_LOG}"; do
     sleep 1
-    if ! pgrep -qf "youtube-dl ${seriesURL}"; then
+    if ! pgrep -qf "youtube-dl $1"; then
       #! This check is important!
       # In case youtube-dl was terminated before an error pattern was catched.
       grep -qE "${errPatterns}" "${DL_LOG}" && break
@@ -766,7 +766,7 @@ fragmentMonitor() {
     fi
   done
 
-  pkill -f "youtube-dl ${seriesURL}"
+  pkill -f "youtube-dl $1"
   sleep 2
   kill "${youtubeDLPID}" &>/dev/null
   sleep 3
@@ -859,12 +859,6 @@ fragmentMonitor() {
   fi
 }
 
-youtubeDl() {
-  script -q "${DL_LOG}" youtube-dl "${seriesURL}" --config-location <(
-    cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "$1" 2>/dev/null
-  ) --download-archive "${archivePath}" "${@:2}"
-}
-
 download() {
   if [[ ${ANIME_DIR} || ${SERIES_DIR} != 0 ]]; then
     assertTask 'Changing directory...'
@@ -910,6 +904,12 @@ download() {
     exit 1
   fi
 
+  ytdArgs=(
+    '--config-location' "$1"
+    '--download-archive' "${archivePath}"
+    "${@:2}"
+  )
+
   [[ ! $* =~ '--autonumber-start' ]] &&
     if grep -qF '%(autonumber)' "${confFile}" 2>/dev/null; then
       assertError 'You are using "autonumber" in filename output.' \
@@ -917,14 +917,20 @@ download() {
       exit 1
     fi
 
+  youtubeDl() {
+    #! Keep the following command inside this function!
+    #* Otherwise, user won't be able to interrupt download process with CTL+C.
+    script -q "${DL_LOG}" youtube-dl "${ytdArgs[@]}"
+  }
+
   for retry in {1..11}; do
-    youtubeDl "${confFile}" "$@" &
+    youtubeDl &
     youtubeDLPID=$!
 
-    renameSubtitles &
+    renameSubtitles "${ytdArgs[@]}" &
     renameSubtitlesPID=$!
 
-    fragmentMonitor
+    fragmentMonitor "${ytdArgs[@]}"
     wait "${youtubeDLPID}" "${renameSubtitlesPID}"
     archiveVideoID
     [[ ! ${fragmentedDownload} ]] && break
@@ -968,14 +974,20 @@ downloadOrStream() {
   cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${confFile}" \
     >"${concatConf}" 2>/dev/null
 
-  if [[ ${streamOrDownload} == Stream ]]; then
+  if [[ ${streamOrDownload} == 'Stream' ]]; then
     if [[ $* =~ '--playlist=' ]]; then
       stream "${concatConf}" "${@:2}"
     else
       stream "${concatConf}" "${@:2}" -- "${seriesURL}"
     fi
-  elif [[ ${streamOrDownload} == Download ]]; then
-    download "${@:2}"
+
+  elif [[ ${streamOrDownload} == 'Download' ]]; then
+    if [[ $* =~ ('-a '|'--batch-file ') ]]; then
+      download "${concatConf}" "${@:2}"
+    else
+      download "${concatConf}" "${@:2}" "${seriesURL}"
+    fi
+
   else
     assertTryAgain downloadOrStream "$@"
   fi
