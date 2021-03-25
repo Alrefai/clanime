@@ -65,6 +65,14 @@ FZF_DEFAULT_OPTS="
   --border \
   --select-1"
 
+YTD_ERRORS='
+  Error in the pull function
+  PES packet size mismatch
+  Failed to open segment
+  Unable to open resource
+  Packet corrupt
+'
+
 baseURL='https://www.crunchyroll.com'
 
 assertTask() {
@@ -708,9 +716,13 @@ getVideoID() {
 }
 
 archiveVideoID() {
+  local archivePath=$1
+  local archiveExtra=$2
+
   if grep -qF 'requested format not available' "${DL_LOG}"; then
     echo
     assertTask 'Adding video-IDs with no matching format to archive...'
+    local formatNotAvailableIDs
     formatNotAvailableIDs=$(getVideoID 'format not available')
 
     if [[ ${formatNotAvailableIDs} ]]; then
@@ -728,10 +740,13 @@ archiveVideoID() {
 
 renameSubtitles() {
   if [[ ${ISO_SUB} != 0 ]]; then
-    while pgrep -qf "youtube-dl $1"; do
-      sleep 10
+    while pgrep -qP "$1"; do
+      sleep 3
+
+      local videoID
+      local lastVideoID
       lastVideoID=$(getVideoID '[Vv]ideo subtitle' | sed '$!d')
-      [[ ${lastVideoID} != "${videoID:-}" ]] || continue
+      [[ ${lastVideoID} != "${videoID}" ]] || continue
       sleep 2
 
       for file in *[A-Z][A-Z].ass; do
@@ -745,42 +760,12 @@ renameSubtitles() {
   fi
 }
 
-fragmentMonitor() {
-  errPatternsList='
-    Error in the pull function
-    PES packet size mismatch
-    Failed to open segment
-    Unable to open resource
-    Packet corrupt
-  '
+processFragmentedDownload() {
+  local fragmentedDownload=$1
+  local patterns=$2
+  local archivePath=$3
 
-  errPatterns=$(trimWhiteSpace "${errPatternsList}" | paste -sd '|' -)
-
-  until grep -qE "${errPatterns}" "${DL_LOG}"; do
-    sleep 1
-    if ! pgrep -qf "youtube-dl $1"; then
-      #! This check is important!
-      # In case youtube-dl was terminated before an error pattern was catched.
-      grep -qE "${errPatterns}" "${DL_LOG}" && break
-      return
-    fi
-  done
-
-  pkill -f "youtube-dl $1"
-  sleep 2
-  kill "${youtubeDLPID}" &>/dev/null
-  sleep 3
-
-  fragmentedDownload=$(
-    awk \
-      '/^\[download\] Destination/{a=$0}/'"${errPatterns}"'/{print a"\n"$0}' \
-      "${DL_LOG}" |
-      grep -F '[download] Destination' |
-      awk -F ': ' '{print $2}' |
-      sort --unique |
-      tr -d '\r'
-  )
-
+  local line
   while IFS= read -r line; do
     if [[ $line != *'mp4'* ]]; then
       assertError 'invalid list of fragmented files!'
@@ -788,31 +773,35 @@ fragmentMonitor() {
     fi
   done <<<"${fragmentedDownload}"
 
+  local filesToDelete
   if [[ ${DELETE_FRAG} != 0 ]]; then
     filesToDelete=$(find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null)
   else
     local header='Found more than one file. Select one or more files to delete:'
     filesToDelete=$(
       find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null |
-        fzf -m --header "${header}"
+        fzf -m --no-select-1 --header "${header}"
     )
   fi
 
   if [[ ${filesToDelete} ]]; then
-    assertError "Fragment error detected! Download terminated."
-    echo
+    local pluralFile
     pluralFile=$(isPlural "${filesToDelete}")
     assertTask "Deleting fragmented file${pluralFile} from disk..."
-    foundPattern=$(grep -oE "${errPatterns}" "${DL_LOG}" | sort --unique)
+    local foundPattern
+    foundPattern=$(grep -oE "${patterns}" "${DL_LOG}" | sort --unique)
 
     if [[ ${foundPattern} ]]; then
+      local pattern
       while IFS= read -r pattern; do
         assertMissing 'Detected error:' "${pattern}"
       done <<<"${foundPattern}"
     fi
 
+    local filesCount
     filesCount=$(wc -l <<<"${filesToDelete}")
 
+    local deleteFragmentedFiles
     [[ ${DELETE_FRAG} == 0 ]] && deleteFragmentedFiles=$(
       assertSelection "
         Confirm permanently deleting the following file${pluralFile} from disk!
@@ -822,6 +811,7 @@ fragmentMonitor() {
       " --header-lines "$((filesCount + 1))"
     )
 
+    local file
     if [[ ${deleteFragmentedFiles} == Yes || ${DELETE_FRAG} != 0 ]]; then
       while IFS= read -r file; do
         rm -f -- "${PWD}/${file}" 2>/dev/null
@@ -841,10 +831,11 @@ fragmentMonitor() {
 
     echo
     assertTask 'Removing fragmented video-ID from archive...'
-    fragmentedID=$(getVideoID "${errPatterns}")
+    local fragmentedID
+    fragmentedID=$(getVideoID "${patterns}")
 
     if [[ ${fragmentedID} ]]; then
-      if grep -qxF "${fragmentedID}" "${archivePath}"; then
+      if grep -qxF "${fragmentedID}" "${archivePath}" 2>/dev/null; then
         assertSuccess 'Backup:' "$(cp -v -- "${archivePath/#$HOME/\~}"{,.bak})"
         sed -ni "/^${fragmentedID}$/!p" "${archivePath}"
 
@@ -852,6 +843,7 @@ fragmentMonitor() {
           assertSuccess 'Removed ID:' "${fragmentedID}"
         else
           assertMissing 'Could not remove ID:' "${fragmentedID}"
+          exit 1
         fi
 
       else
@@ -864,6 +856,41 @@ fragmentMonitor() {
   else
     assertMissing 'Canceled by user'
   fi
+}
+
+fragmentMonitor() {
+  local patterns=$1
+  local downloadPID=$2
+  local ytdArgs=$3
+
+  until grep -qE "${patterns}" "${DL_LOG}"; do
+    sleep 1
+
+    if ! pgrep -qP "${downloadPID}"; then
+      #! This check is important!
+      # In case youtube-dl was terminated before an error pattern was catched.
+      grep -qE "${patterns}" "${DL_LOG}" && break
+      return 0
+    fi
+  done
+
+  pkill -f -- "youtube-dl ${ytdArgs}"
+  while pgrep -qf -- "youtube-dl ${ytdArgs}"; do
+    sleep 1
+  done
+
+  echo
+  assertError "Fragment error detected!"
+  echo
+  assertTask 'Terminating download process...'
+  kill -SIGTERM -- -"${downloadPID}" &>/dev/null
+
+  while pgrep -qP "${downloadPID}"; do
+    sleep 1
+  done
+
+  assertSuccess "Download process has been terminated\n"
+  return 1
 }
 
 download() {
@@ -888,9 +915,10 @@ download() {
 
   #* Keep the following archive variables here.
   #* They must refer to the active directory
-  archivePath="${ARCHIVE_PATH:-${PWD}/archive.txt}"
+  local archivePath="${ARCHIVE_PATH:-${PWD}/archive.txt}"
+  local archiveDir
   archiveDir="$(dirname "${archivePath}")"
-  archiveExtra="${archivePath%.txt}-extra.txt"
+  local archiveExtra="${archivePath%.txt}-extra.txt"
   # --***-- #
 
   assertTask 'Downloading with youtube-dl...'
@@ -911,7 +939,7 @@ download() {
     exit 1
   fi
 
-  ytdArgs=(
+  local ytdArgs=(
     '--config-location' "$1"
     '--download-archive' "${archivePath}"
     "${@:2}"
@@ -930,9 +958,12 @@ download() {
     script -q "${DL_LOG}" youtube-dl "${ytdArgs[@]}"
   }
 
+  local patterns
+  patterns=$(trimWhiteSpace "${YTD_ERRORS}" | paste -sd '|' -)
+
   for retry in {1..11}; do
     youtubeDl &
-    youtubeDLPID=$!
+    local youtubeDLPID=$!
 
     until pgrep -qf -- 'youtube-dl' "${ytdArgs[@]}"; do
       echo -ne \
@@ -944,14 +975,32 @@ download() {
       pgrep -qP "${youtubeDLPID}" || break
     done
 
-    renameSubtitles "${ytdArgs[@]}" &
-    renameSubtitlesPID=$!
+    renameSubtitles "${youtubeDLPID}" &
+    local renameSubtitlesPID=$!
 
-    fragmentMonitor "${ytdArgs[@]}"
+    if ! fragmentMonitor \
+      "${patterns}" "${youtubeDLPID}" "${ytdArgs[@]}"; then
+      local fragmentedDownload
+      fragmentedDownload=$(
+        awk \
+          '/^\[download\] Destination/{a=$0}/'"${patterns}"'/{print a"\n"$0}' \
+          "${DL_LOG}" |
+          grep -F '[download] Destination' |
+          awk -F ': ' '{print $2}' |
+          sort --unique |
+          tr -d '\r'
+      )
+
+      processFragmentedDownload \
+        "${fragmentedDownload}" "${patterns}" "${archivePath}"
+    fi
+
     wait "${youtubeDLPID}" "${renameSubtitlesPID}"
-    archiveVideoID
+    archiveVideoID "${archivePath}" "${archiveExtra}"
     [[ ! ${fragmentedDownload} ]] && break
-    fragmentedDownload=''
+    unset fragmentedDownload
+    unset youtubeDLPID
+    unset renameSubtitlesPID
 
     [[ $* =~ '--autonumber-start ' ]] && break
 
