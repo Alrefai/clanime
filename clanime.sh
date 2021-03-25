@@ -936,6 +936,8 @@ download() {
     [[ ! ${fragmentedDownload} ]] && break
     fragmentedDownload=''
 
+    [[ $* =~ '--autonumber-start ' ]] && break
+
     if [[ ${retry} -gt 10 ]]; then
       assertError 'Maximum retry attempts reached. Try again later!'
       exit 1
