@@ -781,6 +781,13 @@ fragmentMonitor() {
       tr -d '\r'
   )
 
+  while IFS= read -r line; do
+    if [[ $line != *'mp4'* ]]; then
+      assertError 'invalid list of fragmented files!'
+      exit 1
+    fi
+  done <<<"${fragmentedDownload}"
+
   if [[ ${DELETE_FRAG} != 0 ]]; then
     filesToDelete=$(find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null)
   else
