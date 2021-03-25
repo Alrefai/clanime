@@ -846,7 +846,7 @@ fragmentMonitor() {
     if [[ ${fragmentedID} ]]; then
       if grep -qxF "${fragmentedID}" "${archivePath}"; then
         assertSuccess 'Backup:' "$(cp -v -- "${archivePath/#$HOME/\~}"{,.bak})"
-        sed -ni '' "/^${fragmentedID}$/!p" "${archivePath}"
+        sed -ni "/^${fragmentedID}$/!p" "${archivePath}"
 
         if ! grep -qxF "${fragmentedID}" "${archivePath}"; then
           assertSuccess 'Removed ID:' "${fragmentedID}"
