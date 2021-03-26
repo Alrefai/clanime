@@ -381,6 +381,7 @@ parsePlaylistIndex() {
       cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
     ) \
     --dump-json \
+    --match-title '.*' \
     --ignore-errors \
     --playlist-start "${PARSE_INDEX_START}" \
     --format "${format:-best}" |
