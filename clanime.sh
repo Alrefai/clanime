@@ -1263,6 +1263,17 @@ while [[ -n $1 ]]; do
     readonly ISO_SUB=0
     ;;
 
+  --season-template)
+    if [[ $2 =~ ([Ss]ingle|[Mm]ulti|[Cc]ustom) ]]; then
+      readonly DEFAULT_SEASON_NO=$2
+      shift
+    else
+      assertError 'invalid season-template value!' \
+        'Valid values: single, multi, or custom.'
+      exit 1
+    fi
+    ;;
+
   --)
     ARGS=("${@:2}")
     for index in "${!ARGS[@]}"; do
