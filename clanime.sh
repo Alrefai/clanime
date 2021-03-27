@@ -1274,6 +1274,17 @@ while [[ -n $1 ]]; do
     fi
     ;;
 
+  --parse-index)
+    if [[ $2 == +([0-9]) && (($2 -gt 0)) ]]; then
+      readonly PARSE_INDEX_START=$2
+      shift
+    else
+      assertError 'invalid parse-index value!' \
+        'It must be an integer number that is greater than 0.'
+      exit 1
+    fi
+    ;;
+
   --)
     ARGS=("${@:2}")
     for index in "${!ARGS[@]}"; do
