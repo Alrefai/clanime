@@ -1192,8 +1192,24 @@ selectFromWatchList() {
       '.watching[] | select(.title==$title).url' <<<"${list}"
   )
 
-  if [[ ${SERIES} && ${SERIES_URL} ]]; then
-    assertSuccess "Series: ${SERIES}"
+  EXTRACTOR=$(
+    jq --arg title "${SERIES}" -cr \
+      '.watching[] | select(.title==$title).extractor' <<<"${list}"
+  )
+
+  if [[ ${SERIES} ]]; then
+    if [[ ! ${SERIES_URL} ]]; then
+      assertError 'could not parse series url from list!'
+      exit 1
+    fi
+
+    if [[ ! ${EXTRACTOR} ]]; then
+      assertError 'could not parse series extractor from list!'
+      exit 1
+    fi
+
+    assertSuccess 'Extractor:' "${EXTRACTOR}"
+    assertSuccess 'Series:' "${SERIES}"
     assertSuccess 'URL:' "${SERIES_URL}\n"
   else
     assertTryAgain selectFromWatchList
