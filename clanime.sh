@@ -719,8 +719,12 @@ addToWatchList() {
       local list
       list=$(cat "${LIST_JSON}")
 
-      jq --arg url "${SERIES_URL}" --arg title "${SERIES}" \
-        '.watching += [{ $url, $title }]' <<<"${list}" >"${LIST_JSON}"
+      jq \
+        --arg url "${SERIES_URL}" \
+        --arg title "${SERIES}" \
+        --arg extractor "${EXTRACTOR}" \
+        '.watching += [{ $url, $title, $extractor }]' <<<"${list}" \
+        >"${LIST_JSON}"
 
       assertSuccess 'Series added to watching list'
       assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}\n"
