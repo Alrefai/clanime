@@ -1259,6 +1259,10 @@ while [[ -n $1 ]]; do
     readonly MAKE_SUB_DIR=0
     ;;
 
+  --no-iso-sub)
+    readonly ISO_SUB=0
+    ;;
+
   --)
     ARGS=("${@:2}")
     for index in "${!ARGS[@]}"; do
