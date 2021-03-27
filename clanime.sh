@@ -1248,7 +1248,10 @@ while [[ -n $1 ]]; do
     ;;
 
   --)
-    readonly ARGS=("${@:2}")
+    ARGS=("${@:2}")
+    for index in "${!ARGS[@]}"; do
+      [[ ${ARGS[${index}]} ]] || unset "ARGS[${index}]"
+    done
     shift
     break
     ;;
