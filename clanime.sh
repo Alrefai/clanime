@@ -1247,6 +1247,10 @@ while [[ -n $1 ]]; do
     fi
     ;;
 
+  --no-delete)
+    readonly DELETE_FRAG=0
+    ;;
+
   --)
     ARGS=("${@:2}")
     for index in "${!ARGS[@]}"; do
