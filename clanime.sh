@@ -1251,6 +1251,10 @@ while [[ -n $1 ]]; do
     readonly DELETE_FRAG=0
     ;;
 
+  --here)
+    readonly DOWNLOAD_DIR=
+    ;;
+
   --)
     ARGS=("${@:2}")
     for index in "${!ARGS[@]}"; do
