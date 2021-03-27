@@ -45,9 +45,6 @@ YTD_SERIES=${CLANIME_YTD_SERIES_NAME}
 # Create a sub-direcotry with series name (default: on)
 MAKE_SUB_DIR=${CLANIME_MAKE_SUB_DIR}
 
-# Optional download archive path (default: where series is being downloaded)
-ARCHIVE_PATH=${CLANIME_DOWNLOAD_ARCHIVE}
-
 # Optional download directory (default: current working direcotry)
 DOWNLOAD_DIR=${CLANIME_DOWNLOAD_DIR}
 
@@ -62,7 +59,7 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* End of Settings *#
 
-#* --{ Shell Script Glabal Vaibales }-- *#
+#* --{ Shell Script Global Variables }-- *#
 
 unset SERIES
 unset SERIES_URL
@@ -1016,7 +1013,7 @@ download() {
 
   #* Keep the following archive variables here.
   #* They must refer to the active directory
-  local archivePath="${ARCHIVE_PATH:-${PWD}/archive.txt}"
+  local archivePath="${PWD}/archive.txt"
   local archiveDir
   archiveDir="$(dirname "${archivePath}")"
   local archiveExtra="${archivePath%.txt}-extra.txt"
@@ -1295,6 +1292,7 @@ while [[ -n $1 ]]; do
     for index in "${!ARGS[@]}"; do
       [[ ${ARGS[${index}]} ]] || unset "ARGS[${index}]"
     done
+    readonly ARGS
     shift
     break
     ;;
