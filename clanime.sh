@@ -61,6 +61,7 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* --{ Shell Script Global Variables }-- *#
 
+unset EXTRACTOR
 unset SERIES
 unset SERIES_URL
 unset SERIES_CONFIG
@@ -669,7 +670,8 @@ selectConfigFile() {
 preSelectedSeries() {
   assertTask 'Parsing series title with youtube-dl...'
 
-  SERIES=$(
+  local json
+  json=$(
     youtube-dl "${SERIES_URL}" \
       --config-location <(
         cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
@@ -679,15 +681,26 @@ preSelectedSeries() {
       --all-formats \
       --match-title '.*' \
       --no-warnings \
-      --ignore-errors | jq -cr '.series' | safeFilename
+      --ignore-errors
   )
 
-  if [[ ${SERIES} ]]; then
-    assertSuccess 'Series:' "${SERIES}"
-  else
-    assertError 'could not parse series title!'
-    exit 1
+  if [[ ${json} ]]; then
+    SERIES=$(jq -cr '.series' <<<"${json}" | safeFilename)
+    EXTRACTOR=$(jq -cr '.extractor' <<<"${json}")
   fi
+
+  if [[ ${SERIES} ]]; then
+    if [[ ! ${EXTRACTOR} ]]; then
+      assertError 'could not parse extractor name!'
+      exit 1
+    fi
+    assertSuccess 'Exractor:' "${EXTRACTOR}"
+    assertSuccess 'Series:' "${SERIES}"
+    return
+  fi
+
+  assertError 'could not parse series title!'
+  exit 1
 }
 
 addToWatchList() {
