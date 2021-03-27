@@ -34,12 +34,13 @@ readonly EPISODE_PREFIX=${CLANIME_SERIES_EPISODE_PREFIX}
 readonly EPISODE_SUFFIX=${CLANIME_SERIES_EPISODE_SUFFIX:-03d - }
 
 #* --{ User Settings with Environment Variables and CLI }-- *#
+#! on/off values for options: on=1 | off=0
 
 # Output template option for season number (single | multi | custom)
 DEFAULT_SEASON_NO=${CLANIME_DEFAULT_SEASON_NO}
 
-# Remove potentially unsafe characters from episode filename (default: on)
-SAFE_SERIES=${CLANIME_SAFE_SERIES_NAME}
+# Use youtube-dl provided series name in filename template (default: off)
+YTD_SERIES=${CLANIME_YTD_SERIES_NAME}
 
 # Create a sub-direcotry with series name (default: on)
 MAKE_SUB_DIR=${CLANIME_MAKE_SUB_DIR}
@@ -315,7 +316,7 @@ outputTemplate() {
   else
 
     local seriesName
-    if [[ ${SAFE_SERIES} != 0 ]]; then
+    if [[ ${YTD_SERIES} != 1 ]]; then
       seriesName="${SERIES}"
     else
       seriesName='%(series)s'
@@ -1261,6 +1262,10 @@ while [[ -n $1 ]]; do
 
   --no-iso-sub)
     readonly ISO_SUB=0
+    ;;
+
+  --ytd-series)
+    readonly YTD_SERIES=1
     ;;
 
   --season-template)
