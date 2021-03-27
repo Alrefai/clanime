@@ -1255,6 +1255,10 @@ while [[ -n $1 ]]; do
     readonly DOWNLOAD_DIR=
     ;;
 
+  --no-sub-dir)
+    readonly MAKE_SUB_DIR=0
+    ;;
+
   --)
     ARGS=("${@:2}")
     for index in "${!ARGS[@]}"; do
