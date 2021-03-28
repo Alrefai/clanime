@@ -704,7 +704,10 @@ preSelectedSeries() {
 }
 
 addToWatchList() {
-  if ! grep -qF "${SERIES}" "${LIST_JSON}" 2>/dev/null; then
+  local titles
+  titles=$(jq -r '.watching[].title' "${LIST_JSON}")
+
+  if ! grep -qxF "${SERIES}" <<<"${titles}" 2>/dev/null; then
     local confirmAddToWatchList
     confirmAddToWatchList=$(
       assertSelection '
