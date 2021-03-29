@@ -17,9 +17,9 @@ readonly DL_LOG=${CACHE_DIR}/download-log.txt
 # youtube-dl user config path (optional)
 readonly USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 
-# Crunchyroll config path (optional)
+# User config directory for extractors (optional)
 readonly \
-  CRUNCHYROLL_CONFIG=${CRUNCHYROLL_CONFIG:-${CONFIG_DIR}/crunchyroll.conf}
+  EXTRACTORS_CONFIG_DIR=${CLANIME_EXTRACTORS_CONFIG_DIR:-${CONFIG_DIR}}
 
 # Default option for format filter
 readonly \
@@ -61,6 +61,8 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* --{ Shell Script Global Variables }-- *#
 
+unset EXTRACTOR
+unset EXTRACTOR_CONFIG
 unset SERIES
 unset SERIES_URL
 unset SERIES_CONFIG
@@ -101,8 +103,6 @@ readonly YTD_ERRORS='
   Unable to open resource
   Packet corrupt
 '
-
-readonly BASE_URL='https://www.crunchyroll.com'
 
 #* End of Glabal Variables *#
 
@@ -359,8 +359,8 @@ parsePlaylistIndex() {
 
   local format
   format=$(
-    grep -E '^--format ' "${SERIES_CONFIG}" ||
-      grep -E '^--format ' "${CRUNCHYROLL_CONFIG}" |
+    grep '^--format ' "${SERIES_CONFIG}" ||
+      grep '^--format ' "${EXTRACTOR_CONFIG}" |
       awk '{print $2}' |
         sed -e "s/'//g" -e 's/"//g'
   )
@@ -376,7 +376,7 @@ parsePlaylistIndex() {
 
   if youtube-dl "${SERIES_URL}" \
     --config-location <(
-      cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
+      cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" 2>/dev/null
     ) \
     --dump-json \
     --match-title '.*' \
@@ -669,29 +669,44 @@ selectConfigFile() {
 preSelectedSeries() {
   assertTask 'Parsing series title with youtube-dl...'
 
-  SERIES=$(
+  local json
+  json=$(
     youtube-dl "${SERIES_URL}" \
       --config-location <(
-        cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" 2>/dev/null
+        cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" 2>/dev/null
       ) \
       --dump-json \
       --max-download 1 \
       --all-formats \
       --match-title '.*' \
       --no-warnings \
-      --ignore-errors | jq -cr '.series' | safeFilename
+      --ignore-errors
   )
 
-  if [[ ${SERIES} ]]; then
-    assertSuccess 'Series:' "${SERIES}"
-  else
-    assertError 'could not parse series title!'
-    exit 1
+  if [[ ${json} ]]; then
+    SERIES=$(jq -cr '.series' <<<"${json}" | safeFilename)
+    EXTRACTOR=$(jq -cr '.extractor' <<<"${json}")
   fi
+
+  if [[ ${SERIES} ]]; then
+    if [[ ! ${EXTRACTOR} ]]; then
+      assertError 'could not parse extractor name!'
+      exit 1
+    fi
+    assertSuccess 'Exractor:' "${EXTRACTOR}"
+    assertSuccess 'Series:' "${SERIES}"
+    return
+  fi
+
+  assertError 'could not parse series title!'
+  exit 1
 }
 
 addToWatchList() {
-  if ! grep -qF "${SERIES}" "${LIST_JSON}" 2>/dev/null; then
+  local titles
+  titles=$(jq -r '.watching[].title' "${LIST_JSON}")
+
+  if ! grep -qxF "${SERIES}" <<<"${titles}" 2>/dev/null; then
     local confirmAddToWatchList
     confirmAddToWatchList=$(
       assertSelection '
@@ -706,8 +721,12 @@ addToWatchList() {
       local list
       list=$(cat "${LIST_JSON}")
 
-      jq --arg url "${SERIES_URL}" --arg title "${SERIES}" \
-        '.watching += [{ $url, $title }]' <<<"${list}" >"${LIST_JSON}"
+      jq \
+        --arg url "${SERIES_URL}" \
+        --arg title "${SERIES}" \
+        --arg extractor "${EXTRACTOR}" \
+        '.watching += [{ $url, $title, $extractor }]' <<<"${list}" \
+        >"${LIST_JSON}"
 
       assertSuccess 'Series added to watching list'
       assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}\n"
@@ -787,9 +806,9 @@ stream() {
     "${@:2}"
   )
 
-  if grep -qxF '[crunchyroll]' "${mpvConf}"; then
-    assertSuccess 'Crunchyroll profile was found in MPV config file'
-    mpvArgs=('--profile=crunchyroll' "${mpvArgs[@]}")
+  if grep -qxF "[${EXTRACTOR%\:*}]" "${mpvConf}"; then
+    assertSuccess "'${EXTRACTOR%\:*}' profile was found in MPV config file"
+    mpvArgs=("--profile=${EXTRACTOR%\:*}" "${mpvArgs[@]}")
   fi
 
   local playUnicode="${BLUE_TXT}\u25B6${RESET}"
@@ -801,9 +820,9 @@ stream() {
 #! Don't replace `uniq` command with `sort`.
 #* It breaks renameSubtitles function for reversed playlist.
 getVideoID() {
-  local pattern='/^\[crunchyroll\]/{a=$0}/'"${*:-1}"'/{print a"\n"$0}'
+  local pattern="/^\[${EXTRACTOR}\]"'/{a=$0}/'"${*:-1}"'/{print a"\n"$0}'
   awk "${@:1:$#-1}" "${pattern}" "${DL_LOG}" |
-    grep -F '[crunchyroll]' |
+    grep -F "[${EXTRACTOR}]" |
     awk '{print $1, $2}' |
     sed 's/[][]//g;s/://' |
     uniq
@@ -1138,7 +1157,7 @@ downloadOrStream() {
 
   local concatConf
   concatConf=$(mktemp -t clanime.conf)
-  cat "${USER_CONFIG}" "${CRUNCHYROLL_CONFIG}" "${SERIES_CONFIG}" \
+  cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" "${SERIES_CONFIG}" \
     >"${concatConf}" 2>/dev/null
 
   if [[ ${streamOrDownload} == 'Stream' ]]; then
@@ -1175,8 +1194,35 @@ selectFromWatchList() {
       '.watching[] | select(.title==$title).url' <<<"${list}"
   )
 
-  if [[ ${SERIES} && ${SERIES_URL} ]]; then
-    assertSuccess "Series: ${SERIES}"
+  EXTRACTOR=$(
+    jq --arg title "${SERIES}" -cr \
+      '.watching[] | select(.title==$title).extractor' <<<"${list}"
+  )
+
+  if [[ ${SERIES} ]]; then
+    if [[ ! ${SERIES_URL} ]]; then
+      assertError 'could not parse series url from list!'
+      exit 1
+    fi
+
+    if [[ ! ${EXTRACTOR} ]]; then
+      assertError 'could not parse series extractor from list!'
+      exit 1
+    fi
+
+    local extractorConf
+    extractorConf=$(safeFilename <<<"${EXTRACTOR%\:*}")
+    EXTRACTOR_CONFIG=${EXTRACTORS_CONFIG_DIR}/${extractorConf}.conf
+
+    assertSuccess 'Extractor:' "${EXTRACTOR}"
+    if [[ -f ${EXTRACTOR_CONFIG} ]]; then
+      assertSuccess 'Extractor config:' "${EXTRACTOR_CONFIG/#$HOME/\~}"
+    else
+      assertMissing 'Extractor config not found:' \
+        "${EXTRACTOR_CONFIG/#$HOME/\~}"
+      unset EXTRACTOR_CONFIG
+    fi
+    assertSuccess 'Series:' "${SERIES}"
     assertSuccess 'URL:' "${SERIES_URL}\n"
   else
     assertTryAgain selectFromWatchList
@@ -1222,8 +1268,43 @@ configProcessOptions() {
   done
 }
 
+processExtractorEntry() {
+  assertTask 'Validating extractor with youtube-dl...'
+
+  local extractorEntry
+  if ! extractorEntry=$(
+    youtube-dl --list-extractors |
+      grep -iF "${EXTRACTOR_ENTRY}" |
+      head -n 1
+  ); then
+    assertError 'extractor not found in yotube-dl list!'
+    exit 1
+  fi
+
+  local extractorConf
+  extractorConf=$(safeFilename <<<"${extractorEntry%\:*}")
+  EXTRACTOR_CONFIG=${EXTRACTORS_CONFIG_DIR}/${extractorConf}.conf
+  assertSuccess 'Extractor entry:' "${extractorEntry}"
+
+  if [[ -f ${EXTRACTOR_CONFIG} ]]; then
+    assertSuccess 'Extractor config:' "${EXTRACTOR_CONFIG/#$HOME/\~}\n"
+  else
+    assertMissing 'Extractor config not found:' \
+      "${EXTRACTOR_CONFIG/#$HOME/\~}\n"
+    unset EXTRACTOR_CONFIG
+  fi
+}
+
+validateOptionValue() {
+  if [[ $2 =~ ^'-' ]]; then
+    assertError "invalid value '$2' for option '$1'." \
+      "Do not use a value that begins with '-'."
+    exit 1
+  fi
+}
+
 #* --{ Main workflow }-- *#
-while [[ -n $1 ]]; do
+while [[ $1 ]]; do
   case "$1" in
   st | stream)
     if [[ ! ${SUB_COMMAND} ]]; then
@@ -1243,6 +1324,12 @@ while [[ -n $1 ]]; do
         'Pass either stream (st) or download (dl) as a subcommand.'
       exit 1
     fi
+    ;;
+
+  -e | --extractor)
+    validateOptionValue "$1" "$2"
+    readonly EXTRACTOR_ENTRY=$2
+    shift
     ;;
 
   --no-delete)
@@ -1298,11 +1385,8 @@ while [[ -n $1 ]]; do
     ;;
 
   *)
-    if [[ $1 == ${BASE_URL}* ]]; then
-      readonly SERIES_URL="$1"
-    elif [[ $1 == 'http'* ]]; then
-      assertError 'invalid crunchyroll URL:' "$1"
-      exit 1
+    if [[ $1 =~ https?://.* ]]; then
+      readonly SERIES_URL=$1
     else
       assertError 'invalid option:' "$1"
       exit 1
@@ -1332,6 +1416,7 @@ fi
 
 if [[ ${SERIES_URL} ]]; then
   readonly MAIN="${SERIES_URL}"
+  [[ ${EXTRACTOR_ENTRY} ]] && processExtractorEntry
 
 elif [[ ! -s ${LIST_JSON} ]]; then
   assertMissing 'Nothing is stored in your local list, yet!' \
@@ -1347,10 +1432,9 @@ else
   )
 fi
 
-if [[ ! ${MAIN} ]]; then
-  exit 1
+[[ ${MAIN} ]] || exit 1
 
-elif [[ ${MAIN} == ${BASE_URL}* ]]; then
+if [[ ${SERIES_URL} ]]; then
   preSelectedSeries
   addToWatchList
   processConfig
