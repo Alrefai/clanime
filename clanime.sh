@@ -863,7 +863,7 @@ renameSubtitles() {
       [[ ${lastVideoID} != "${videoID}" ]] || continue
       sleep 2
 
-      for file in *[A-Z][A-Z].ass; do
+      for file in *.[a-z][a-z][A-Z][A-Z].ass; do
         echo \
           "${CYAN_TXT}[${MAGENTA_BOLD_TXT}" \
           "rename subtitle to ISO 639-1" \
