@@ -806,9 +806,9 @@ stream() {
     "${@:2}"
   )
 
-  if grep -qxF '[crunchyroll]' "${mpvConf}"; then
-    assertSuccess 'Crunchyroll profile was found in MPV config file'
-    mpvArgs=('--profile=crunchyroll' "${mpvArgs[@]}")
+  if grep -qxF "[${EXTRACTOR%\:*}]" "${mpvConf}"; then
+    assertSuccess "'${EXTRACTOR%\:*}' profile was found in MPV config file"
+    mpvArgs=("--profile=${EXTRACTOR%\:*}" "${mpvArgs[@]}")
   fi
 
   local playUnicode="${BLUE_TXT}\u25B6${RESET}"
