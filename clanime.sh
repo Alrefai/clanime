@@ -820,9 +820,9 @@ stream() {
 #! Don't replace `uniq` command with `sort`.
 #* It breaks renameSubtitles function for reversed playlist.
 getVideoID() {
-  local pattern='/^\[crunchyroll\]/{a=$0}/'"${*:-1}"'/{print a"\n"$0}'
+  local pattern="/^\[${EXTRACTOR}\]"'/{a=$0}/'"${*:-1}"'/{print a"\n"$0}'
   awk "${@:1:$#-1}" "${pattern}" "${DL_LOG}" |
-    grep -F '[crunchyroll]' |
+    grep -F "[${EXTRACTOR}]" |
     awk '{print $1, $2}' |
     sed 's/[][]//g;s/://' |
     uniq
