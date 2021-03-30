@@ -94,6 +94,7 @@ readonly FZF_DEFAULT_OPTS="
   --height 20% \
   --min-height 15 \
   --border \
+  --exit-0 \
   --select-1"
 
 readonly YTD_ERRORS='
@@ -1235,6 +1236,66 @@ selectFromWatchList() {
   fi
 }
 
+moveToList() {
+  local from=$1
+  local to=$2
+
+  if [[ ! -f ${LIST_JSON} ]]; then
+    assertError 'List "JSON" file not found:' "${LIST_JSON}"
+    exit 1
+  fi
+
+  local json
+  json=$(cat "${LIST_JSON}")
+
+  local series
+  series=$(
+    jq -cr --arg list "${from}" '.[$list][]?.title' <<<"${json}" |
+      fzf -m --no-select-1 |
+      jq -cR |
+      jq -cs
+  )
+
+  if [[ ${series} == '[]' ]]; then
+    assertMissing 'Nothing to move!'
+    exit
+  fi
+
+  local objectsList
+  objectsList=$(
+    jq --argjson series "${series}" --arg list "${from}" -c \
+      '.[$list] | map(select(.title as $title | $series | index($title)))' \
+      <<<"${json}"
+  )
+
+  local backupDir
+  backupDir=$(dirname "${LIST_JSON}")/list-backup
+  if ! mkdir -p "${backupDir}" 2>/dev/null; then
+    assertError 'could not create list backup directory:' "${backupDir}"
+    exit 1
+  fi
+
+  assertSuccess 'Backup list:' "$(
+    cp -v -- "${LIST_JSON}" \
+      "${backupDir}/$(basename "${LIST_JSON}").$(date '+%Y-%m-%d_%s')".bak |
+      awk -F ' -> ' '{print $2}' |
+      sed "s;${HOME};~;"
+  )"
+
+  if ! jq --argjson objectsList "${objectsList}" \
+    --arg fromList "${from}" \
+    --arg toList "${to}" \
+    '.[$toList] += $objectsList | .[$fromList] -= $objectsList' <<<"${json}" \
+    >"${LIST_JSON}"; then
+    assertError
+    exit 1
+  else
+    assertSuccess "Series moved from ${from} list to ${to} list:" "\n$(
+      jq -cr 'map("- "+.)[]' <<<"${series}"
+    )"
+  fi
+}
+
 browse() {
   if [[ ! $1 ]]; then
     exit 1
@@ -1433,7 +1494,8 @@ else
   readonly MAIN=$(
     assertSelection "
       ${BROWSE_LIST}
-      Process Configurations ${YELLOW_BOLD_TXT}ONLY${RESET}
+      Process Configurations
+      Move Series to Archive
     "
   )
 fi
@@ -1445,6 +1507,9 @@ if [[ ${SERIES_URL} ]]; then
   addToWatchList
   processConfig
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
+
+elif [[ ${MAIN} == 'Move Series to Archive' ]]; then
+  moveToList 'watching' 'archive'
 
 elif [[ ${MAIN} != 'Process'* ]]; then
   assertSuccess "Browse: ${MAIN}\n"
