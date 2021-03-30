@@ -854,6 +854,16 @@ archiveVideoID() {
 
 renameSubtitles() {
   if [[ ${ISO_SUB} != 0 ]]; then
+    renaming() {
+      for file in *.[a-z][a-z][A-Z][A-Z].ass; do
+        [[ -f ${file} ]] && echo \
+          "${CYAN_TXT}[${MAGENTA_BOLD_TXT}" \
+          "rename subtitle to ISO 639-1" \
+          "${CYAN_TXT}]${RESET}" \
+          "$(mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass")"
+      done 2>/dev/null
+    }
+
     while pgrep -qP "$1"; do
       sleep 3
 
@@ -862,15 +872,10 @@ renameSubtitles() {
       lastVideoID=$(getVideoID '[Vv]ideo subtitle' | sed '$!d')
       [[ ${lastVideoID} != "${videoID}" ]] || continue
       sleep 2
-
-      for file in *.[a-z][a-z][A-Z][A-Z].ass; do
-        echo \
-          "${CYAN_TXT}[${MAGENTA_BOLD_TXT}" \
-          "rename subtitle to ISO 639-1" \
-          "${CYAN_TXT}]${RESET}" \
-          "$(mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass")"
-      done 2>/dev/null && videoID="${lastVideoID}"
+      renaming && videoID="${lastVideoID}"
     done
+
+    renaming
   fi
 }
 
