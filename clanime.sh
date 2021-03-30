@@ -359,10 +359,11 @@ parsePlaylistIndex() {
 
   local format
   format=$(
-    grep '^--format ' "${SERIES_CONFIG}" ||
-      grep '^--format ' "${EXTRACTOR_CONFIG}" |
+    cat "${EXTRACTOR_CONFIG}" "${SERIES_CONFIG}" 2>/dev/null |
+      grep '^--format ' |
+      tail -n 1 |
       awk '{print $2}' |
-        sed -e "s/'//g" -e 's/"//g'
+      sed -e "s/'//g" -e 's/"//g'
   )
 
   if [[ ${format} ]]; then
