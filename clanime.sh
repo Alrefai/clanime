@@ -709,7 +709,7 @@ addToWatchList() {
   json=$(cat "${LIST_JSON}")
 
   local titles
-  titles=$(jq -r '.watching[]?.title' <<<"${json}")
+  titles=$(jq -r '.[][]?.title' <<<"${json}")
 
   if ! grep -qxF "${SERIES}" <<<"${titles}" 2>/dev/null; then
     local confirmAddToWatchList
@@ -737,7 +737,14 @@ addToWatchList() {
     fi
 
   else
-    assertSuccess "Series is in watching list"
+    local list
+    list=$(
+      jq -cr --arg title "${SERIES}" \
+        'keys[] as $list | select(.[$list][].title==$title) | $list' \
+        <<<"${json}"
+    )
+
+    assertSuccess "Series is in '${list}' list"
     assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}\n"
   fi
 }
