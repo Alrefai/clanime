@@ -8,7 +8,7 @@ readonly CACHE_HOME=${XDG_CACHE_HOME:-${HOME}/.cache}
 readonly CACHE_DIR=${CACHE_HOME}/clanime
 readonly CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
 readonly CONFIG_DIR=${CONFIG_HOME}/clanime
-readonly INDEX_DIR=${CONFIG_DIR}/playlist-index
+readonly INDEX_DIR=${CACHE_DIR}/playlist-index
 readonly LIST_JSON=${CONFIG_DIR}/list.json
 readonly DL_LOG=${CACHE_DIR}/download-log.txt
 
