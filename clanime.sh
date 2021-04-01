@@ -70,8 +70,6 @@ unset SUB_COMMAND
 unset ARGS
 unset MAIN
 
-readonly BROWSE_LIST='Watching List'
-
 # Font styling and colors
 
 readonly BOLD_TXT=$'\e[1m'
@@ -94,6 +92,7 @@ readonly FZF_DEFAULT_OPTS="
   --height 20% \
   --min-height 15 \
   --border \
+  --exit-0 \
   --select-1"
 
 readonly YTD_ERRORS='
@@ -704,8 +703,13 @@ preSelectedSeries() {
 }
 
 addToWatchList() {
+  [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
+
+  local json
+  json=$(cat "${LIST_JSON}")
+
   local titles
-  titles=$(jq -r '.watching[].title' "${LIST_JSON}")
+  titles=$(jq -r '.[][]?.title' <<<"${json}")
 
   if ! grep -qxF "${SERIES}" <<<"${titles}" 2>/dev/null; then
     local confirmAddToWatchList
@@ -718,15 +722,11 @@ addToWatchList() {
     )
 
     if [[ ${confirmAddToWatchList} == 'Yes' ]]; then
-      [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
-      local list
-      list=$(cat "${LIST_JSON}")
-
       jq \
         --arg url "${SERIES_URL}" \
         --arg title "${SERIES}" \
         --arg extractor "${EXTRACTOR}" \
-        '.watching += [{ $url, $title, $extractor }]' <<<"${list}" \
+        '.watching += [{ $url, $title, $extractor }]' <<<"${json}" \
         >"${LIST_JSON}"
 
       assertSuccess 'Series added to watching list'
@@ -737,7 +737,14 @@ addToWatchList() {
     fi
 
   else
-    assertSuccess "Series is in watching list"
+    local list
+    list=$(
+      jq -cr --arg title "${SERIES}" \
+        'keys[] as $list | select(.[$list][].title==$title) | $list' \
+        <<<"${json}"
+    )
+
+    assertSuccess "Series is in '${list}' list"
     assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}\n"
   fi
 }
@@ -1187,22 +1194,28 @@ downloadOrStream() {
   rm -f -- "${concatConf}" 2>/dev/null
 }
 
-selectFromWatchList() {
-  local list
-  list=$(cat "${LIST_JSON}")
+selectFromList() {
+  local selectedList=$1
+
+  local json
+  json=$(cat "${LIST_JSON}")
 
   SERIES=$(
-    jq -cr '.watching[].title' <<<"${list}" | fzf
+    jq --arg list "${selectedList}" -cr '.[$list][].title' <<<"${json}" | fzf
   )
 
   SERIES_URL=$(
-    jq --arg title "${SERIES}" -cr \
-      '.watching[] | select(.title==$title).url' <<<"${list}"
+    jq -cr \
+      --arg list "${selectedList}" \
+      --arg title "${SERIES}" \
+      '.[$list][] | select(.title==$title).url' <<<"${json}"
   )
 
   EXTRACTOR=$(
-    jq --arg title "${SERIES}" -cr \
-      '.watching[] | select(.title==$title).extractor' <<<"${list}"
+    jq -cr \
+      --arg list "${selectedList}" \
+      --arg title "${SERIES}" \
+      '.[$list][] | select(.title==$title).extractor' <<<"${json}"
   )
 
   if [[ ${SERIES} ]]; then
@@ -1228,19 +1241,181 @@ selectFromWatchList() {
         "${EXTRACTOR_CONFIG/#$HOME/\~}"
       unset EXTRACTOR_CONFIG
     fi
+
     assertSuccess 'Series:' "${SERIES}"
     assertSuccess 'URL:' "${SERIES_URL}\n"
   else
-    assertTryAgain selectFromWatchList
+    assertTryAgain selectFromList "$@"
   fi
+}
+
+moveToList() {
+  local from=$1
+  local to=$2
+
+  if [[ ! -f ${LIST_JSON} ]]; then
+    assertError 'List "JSON" file not found:' "${LIST_JSON}"
+    exit 1
+  fi
+
+  local json
+  json=$(cat "${LIST_JSON}")
+
+  if [[ ${from} ]]; then
+    if ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${from}"; then
+      assertError "${from} list is not available!"
+      exit 1
+    fi
+  else
+    if ! from=$(
+      assertSelection "
+        $([[ ${to} == 'delete' ]] && echo 'Delete' || echo 'Move') series from:
+        $(browseListAll <<<"${json}" | grep -vxF "${to^} List")
+      " --header-lines 1 | awk '{print tolower($1)}'
+    ); then
+      assertMissing 'Aborted by user'
+      exit
+    fi
+  fi
+
+  local series
+  if [[ ${SERIES} ]]; then
+    series=$(jq -cR <<<"${SERIES}" | jq -cs)
+  else
+    series=$(
+      jq -cr --arg list "${from}" '.[$list][]?.title' <<<"${json}" |
+        fzf -m --no-select-1 |
+        jq -cR |
+        jq -cs
+    )
+  fi
+
+  if [[ ${series} == '[]' ]]; then
+    assertMissing 'Nothing in the list!'
+    exit
+  fi
+
+  local objectsList
+  objectsList=$(
+    jq --argjson series "${series}" --arg list "${from}" -c \
+      '.[$list] | map(select(.title as $title | $series | index($title)))' \
+      <<<"${json}"
+  )
+
+  if [[ ${to} ]]; then
+    if [[ ${to} != 'delete' ]] &&
+      ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${to}"; then
+      assertError "${to} list is not available!"
+      exit 1
+    fi
+  else
+    if ! to=$(
+      assertSelection "
+        Move series to:
+        $(browseListAll <<<"${json}" | grep -vxF "${from^} List")
+      " --header-lines 1 | awk '{print tolower($1)}'
+    ); then
+      assertMissing 'Aborted by user'
+      exit
+    fi
+  fi
+
+  backupList() {
+    local backupDir
+    backupDir=$(dirname "${LIST_JSON}")/list-backup
+    if ! mkdir -p "${backupDir}" 2>/dev/null; then
+      assertError 'could not create list backup directory:' "${backupDir}"
+      exit 1
+    fi
+
+    assertSuccess 'Backup list:' "$(
+      cp -v -- "${LIST_JSON}" \
+        "${backupDir}/$(basename "${LIST_JSON}").$(date '+%Y-%m-%d_%s')".bak |
+        awk -F ' -> ' '{print $2}' |
+        sed "s;${HOME};~;"
+    )"
+  }
+
+  if [[ ${to} == 'delete' ]]; then
+    assertWarning 'the following series will be permanently deleted from' \
+      "${from} List"
+    jq -cr 'map("- "+.)[]' <<<"${series}"
+
+    confirmDelete=$(
+      assertSelection '
+        Are you sure about that?
+        Yes
+        No
+      ' --header-lines 1
+    )
+
+    if [[ ${confirmDelete} == 'Yes' ]]; then
+      if ! backupList || ! jq --argjson objectsList "${objectsList}" \
+        --arg fromList "${from}" \
+        '.[$fromList] -= $objectsList' <<<"${json}" \
+        >"${LIST_JSON}"; then
+        assertError
+        exit 1
+      else
+        assertSuccess "Series deleted from ${from} list"
+        return
+      fi
+    else
+      assertMissing 'Aborted by user'
+      exit
+    fi
+  fi
+
+  if ! backupList || ! jq --argjson objectsList "${objectsList}" \
+    --arg fromList "${from}" \
+    --arg toList "${to}" \
+    '.[$toList] += $objectsList | .[$fromList] -= $objectsList' <<<"${json}" \
+    >"${LIST_JSON}"; then
+    assertError
+    exit 1
+  else
+    assertSuccess "Series moved from ${from} list to ${to} list"
+    if [[ ! ${SERIES} ]]; then
+      jq -cr 'map("- "+.)[]' <<<"${series}"
+    else
+      echo
+    fi
+  fi
+}
+
+browseListAll() {
+  jq -cr 'keys_unsorted[]' | sed 's/./\u&/;s/$/ List/'
+}
+
+browseList() {
+  jq -c '
+    walk(if type=="object" then with_entries(select(.value!=[])) else . end)
+  ' "${LIST_JSON}" | browseListAll
 }
 
 browse() {
   if [[ ! $1 ]]; then
     exit 1
   else
-    assertTask 'Awaiting user selection from watching list...'
-    selectFromWatchList
+    assertTask "Awaiting user selection from ${1,,} list..."
+    selectFromList "${1,,}"
+
+    if [[ $1 == 'Archive' ]]; then
+      local confirmMove
+      confirmMove=$(
+        assertSelection '
+          Do you want to move this series to another list?
+          Yes
+          No
+        ' --header-lines 1
+      )
+
+      if [[ ${confirmMove} == 'Yes' ]]; then
+        assertTask 'Moving series from archive...'
+        moveToList 'archive'
+      fi
+    fi
+
   fi
 }
 
@@ -1249,7 +1424,7 @@ configProcessOptions() {
   processOption=$(
     assertSelection "
       Process configurations of a series from...
-      ${BROWSE_LIST}
+      $(browseList)
     " --header-lines 1
   )
 
@@ -1429,11 +1604,19 @@ elif [[ ! -s ${LIST_JSON} ]]; then
     'Provide at least one URL.'
 
 else
+  if ! jq -c 'keys[]' "${LIST_JSON}" &>/dev/null; then
+    assertError 'list is corrupted!' 'Try to recover it from list backup.'
+    exit 1
+  fi
+
   assertTask 'Awaiting user selection from main options...'
   readonly MAIN=$(
     assertSelection "
-      ${BROWSE_LIST}
-      Process Configurations ${YELLOW_BOLD_TXT}ONLY${RESET}
+      $(browseList)
+      Process Configurations
+      Delete Series From a List
+      Move Series Between Lists
+      Move Series to Archive
     "
   )
 fi
@@ -1445,6 +1628,15 @@ if [[ ${SERIES_URL} ]]; then
   addToWatchList
   processConfig
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
+
+elif [[ ${MAIN} == 'Delete Series From a List' ]]; then
+  moveToList '' 'delete'
+
+elif [[ ${MAIN} == 'Move Series Between Lists' ]]; then
+  moveToList
+
+elif [[ ${MAIN} == 'Move Series to Archive' ]]; then
+  moveToList '' 'archive'
 
 elif [[ ${MAIN} != 'Process'* ]]; then
   assertSuccess "Browse: ${MAIN}\n"
