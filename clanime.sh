@@ -70,8 +70,6 @@ unset SUB_COMMAND
 unset ARGS
 unset MAIN
 
-readonly BROWSE_LIST='Watching List'
-
 # Font styling and colors
 
 readonly BOLD_TXT=$'\e[1m'
@@ -1189,22 +1187,28 @@ downloadOrStream() {
   rm -f -- "${concatConf}" 2>/dev/null
 }
 
-selectFromWatchList() {
-  local list
-  list=$(cat "${LIST_JSON}")
+selectFromList() {
+  local selectedList=$1
+
+  local json
+  json=$(cat "${LIST_JSON}")
 
   SERIES=$(
-    jq -cr '.watching[].title' <<<"${list}" | fzf
+    jq --arg list "${selectedList}" -cr '.[$list][].title' <<<"${json}" | fzf
   )
 
   SERIES_URL=$(
-    jq --arg title "${SERIES}" -cr \
-      '.watching[] | select(.title==$title).url' <<<"${list}"
+    jq -cr \
+      --arg list "${selectedList}" \
+      --arg title "${SERIES}" \
+      '.[$list][] | select(.title==$title).url' <<<"${json}"
   )
 
   EXTRACTOR=$(
-    jq --arg title "${SERIES}" -cr \
-      '.watching[] | select(.title==$title).extractor' <<<"${list}"
+    jq -cr \
+      --arg list "${selectedList}" \
+      --arg title "${SERIES}" \
+      '.[$list][] | select(.title==$title).extractor' <<<"${json}"
   )
 
   if [[ ${SERIES} ]]; then
@@ -1230,10 +1234,11 @@ selectFromWatchList() {
         "${EXTRACTOR_CONFIG/#$HOME/\~}"
       unset EXTRACTOR_CONFIG
     fi
+
     assertSuccess 'Series:' "${SERIES}"
     assertSuccess 'URL:' "${SERIES_URL}\n"
   else
-    assertTryAgain selectFromWatchList
+    assertTryAgain selectFromList "$@"
   fi
 }
 
@@ -1297,12 +1302,22 @@ moveToList() {
   fi
 }
 
+browseListAll() {
+  jq -cr 'keys_unsorted[]' | sed 's/./\u&/;s/$/ List/'
+}
+
+browseList() {
+  jq -c '
+    walk(if type=="object" then with_entries(select(.value!=[])) else . end)
+  ' "${LIST_JSON}" | browseListAll
+}
+
 browse() {
   if [[ ! $1 ]]; then
     exit 1
   else
-    assertTask 'Awaiting user selection from watching list...'
-    selectFromWatchList
+    assertTask "Awaiting user selection from ${1,,} list..."
+    selectFromList "${1,,}"
   fi
 }
 
@@ -1311,7 +1326,7 @@ configProcessOptions() {
   processOption=$(
     assertSelection "
       Process configurations of a series from...
-      ${BROWSE_LIST}
+      $(browseList)
     " --header-lines 1
   )
 
@@ -1491,10 +1506,15 @@ elif [[ ! -s ${LIST_JSON} ]]; then
     'Provide at least one URL.'
 
 else
+  if ! jq -c 'keys[]' "${LIST_JSON}" &>/dev/null; then
+    assertError 'list is corrupted!' 'Try to recover it from list backup.'
+    exit 1
+  fi
+
   assertTask 'Awaiting user selection from main options...'
   readonly MAIN=$(
     assertSelection "
-      ${BROWSE_LIST}
+      $(browseList)
       Process Configurations
       Move Series to Archive
     "
