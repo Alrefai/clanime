@@ -1269,7 +1269,7 @@ moveToList() {
   else
     if ! from=$(
       assertSelection "
-        Move series from...
+        $([[ ${to} == 'delete' ]] && echo 'Delete' || echo 'Move') series from:
         $(browseListAll <<<"${json}" | grep -vxF "${to^} List")
       " --header-lines 1 | awk '{print tolower($1)}'
     ); then
@@ -1291,7 +1291,7 @@ moveToList() {
   fi
 
   if [[ ${series} == '[]' ]]; then
-    assertMissing 'Nothing to move!'
+    assertMissing 'Nothing in the list!'
     exit
   fi
 
@@ -1303,14 +1303,15 @@ moveToList() {
   )
 
   if [[ ${to} ]]; then
-    if ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${to}"; then
+    if [[ ${to} != 'delete' ]] &&
+      ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${to}"; then
       assertError "${to} list is not available!"
       exit 1
     fi
   else
     if ! to=$(
       assertSelection "
-        Move series to...
+        Move series to:
         $(browseListAll <<<"${json}" | grep -vxF "${from^} List")
       " --header-lines 1 | awk '{print tolower($1)}'
     ); then
@@ -1319,21 +1320,53 @@ moveToList() {
     fi
   fi
 
-  local backupDir
-  backupDir=$(dirname "${LIST_JSON}")/list-backup
-  if ! mkdir -p "${backupDir}" 2>/dev/null; then
-    assertError 'could not create list backup directory:' "${backupDir}"
-    exit 1
+  backupList() {
+    local backupDir
+    backupDir=$(dirname "${LIST_JSON}")/list-backup
+    if ! mkdir -p "${backupDir}" 2>/dev/null; then
+      assertError 'could not create list backup directory:' "${backupDir}"
+      exit 1
+    fi
+
+    assertSuccess 'Backup list:' "$(
+      cp -v -- "${LIST_JSON}" \
+        "${backupDir}/$(basename "${LIST_JSON}").$(date '+%Y-%m-%d_%s')".bak |
+        awk -F ' -> ' '{print $2}' |
+        sed "s;${HOME};~;"
+    )"
+  }
+
+  if [[ ${to} == 'delete' ]]; then
+    assertWarning 'the following series will be permanently deleted from' \
+      "${from} List"
+    jq -cr 'map("- "+.)[]' <<<"${series}"
+
+    confirmDelete=$(
+      assertSelection '
+        Are you sure about that?
+        Yes
+        No
+      ' --header-lines 1
+    )
+
+    if [[ ${confirmDelete} == 'Yes' ]]; then
+      if ! backupList || ! jq --argjson objectsList "${objectsList}" \
+        --arg fromList "${from}" \
+        '.[$fromList] -= $objectsList' <<<"${json}" \
+        >"${LIST_JSON}"; then
+        assertError
+        exit 1
+      else
+        assertSuccess "Series deleted from ${from} list"
+        return
+      fi
+    else
+      assertMissing 'Aborted by user'
+      exit
+    fi
   fi
 
-  assertSuccess 'Backup list:' "$(
-    cp -v -- "${LIST_JSON}" \
-      "${backupDir}/$(basename "${LIST_JSON}").$(date '+%Y-%m-%d_%s')".bak |
-      awk -F ' -> ' '{print $2}' |
-      sed "s;${HOME};~;"
-  )"
-
-  if ! jq --argjson objectsList "${objectsList}" \
+  if ! backupList || ! jq --argjson objectsList "${objectsList}" \
     --arg fromList "${from}" \
     --arg toList "${to}" \
     '.[$toList] += $objectsList | .[$fromList] -= $objectsList' <<<"${json}" \
@@ -1581,6 +1614,7 @@ else
     assertSelection "
       $(browseList)
       Process Configurations
+      Delete Series From a List
       Move Series Between Lists
       Move Series to Archive
     "
@@ -1594,6 +1628,9 @@ if [[ ${SERIES_URL} ]]; then
   addToWatchList
   processConfig
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
+
+elif [[ ${MAIN} == 'Delete Series From a List' ]]; then
+  moveToList '' 'delete'
 
 elif [[ ${MAIN} == 'Move Series Between Lists' ]]; then
   moveToList
