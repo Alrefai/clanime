@@ -1595,7 +1595,7 @@ if [[ ${SERIES_URL} ]]; then
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
 
 elif [[ ${MAIN} == 'Move Series to Archive' ]]; then
-  moveToList 'watching' 'archive'
+  moveToList '' 'archive'
 
 elif [[ ${MAIN} != 'Process'* ]]; then
   assertSuccess "Browse: ${MAIN}\n"
