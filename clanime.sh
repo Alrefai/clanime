@@ -1581,6 +1581,7 @@ else
     assertSelection "
       $(browseList)
       Process Configurations
+      Move Series Between Lists
       Move Series to Archive
     "
   )
@@ -1593,6 +1594,9 @@ if [[ ${SERIES_URL} ]]; then
   addToWatchList
   processConfig
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
+
+elif [[ ${MAIN} == 'Move Series Between Lists' ]]; then
+  moveToList
 
 elif [[ ${MAIN} == 'Move Series to Archive' ]]; then
   moveToList '' 'archive'
