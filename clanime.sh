@@ -1261,13 +1261,34 @@ moveToList() {
   local json
   json=$(cat "${LIST_JSON}")
 
+  if [[ ${from} ]]; then
+    if ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${from}"; then
+      assertError "${from} list is not available!"
+      exit 1
+    fi
+  else
+    if ! from=$(
+      assertSelection "
+        Move series from...
+        $(browseListAll <<<"${json}" | grep -vxF "${to^} List")
+      " --header-lines 1 | awk '{print tolower($1)}'
+    ); then
+      assertMissing 'Aborted by user'
+      exit
+    fi
+  fi
+
   local series
-  series=$(
-    jq -cr --arg list "${from}" '.[$list][]?.title' <<<"${json}" |
-      fzf -m --no-select-1 |
-      jq -cR |
-      jq -cs
-  )
+  if [[ ${SERIES} ]]; then
+    series=$(jq -cR <<<"${SERIES}" | jq -cs)
+  else
+    series=$(
+      jq -cr --arg list "${from}" '.[$list][]?.title' <<<"${json}" |
+        fzf -m --no-select-1 |
+        jq -cR |
+        jq -cs
+    )
+  fi
 
   if [[ ${series} == '[]' ]]; then
     assertMissing 'Nothing to move!'
@@ -1280,6 +1301,23 @@ moveToList() {
       '.[$list] | map(select(.title as $title | $series | index($title)))' \
       <<<"${json}"
   )
+
+  if [[ ${to} ]]; then
+    if ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${to}"; then
+      assertError "${to} list is not available!"
+      exit 1
+    fi
+  else
+    if ! to=$(
+      assertSelection "
+        Move series to...
+        $(browseListAll <<<"${json}" | grep -vxF "${from^} List")
+      " --header-lines 1 | awk '{print tolower($1)}'
+    ); then
+      assertMissing 'Aborted by user'
+      exit
+    fi
+  fi
 
   local backupDir
   backupDir=$(dirname "${LIST_JSON}")/list-backup
@@ -1303,9 +1341,12 @@ moveToList() {
     assertError
     exit 1
   else
-    assertSuccess "Series moved from ${from} list to ${to} list:" "\n$(
+    assertSuccess "Series moved from ${from} list to ${to} list"
+    if [[ ! ${SERIES} ]]; then
       jq -cr 'map("- "+.)[]' <<<"${series}"
-    )"
+    else
+      echo
+    fi
   fi
 }
 
@@ -1325,6 +1366,23 @@ browse() {
   else
     assertTask "Awaiting user selection from ${1,,} list..."
     selectFromList "${1,,}"
+
+    if [[ $1 == 'Archive' ]]; then
+      local confirmMove
+      confirmMove=$(
+        assertSelection '
+          Do you want to move this series to another list?
+          Yes
+          No
+        ' --header-lines 1
+      )
+
+      if [[ ${confirmMove} == 'Yes' ]]; then
+        assertTask 'Moving series from archive...'
+        moveToList 'archive'
+      fi
+    fi
+
   fi
 }
 
