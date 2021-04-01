@@ -705,8 +705,13 @@ preSelectedSeries() {
 }
 
 addToWatchList() {
+  [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
+
+  local json
+  json=$(cat "${LIST_JSON}")
+
   local titles
-  titles=$(jq -r '.watching[].title' "${LIST_JSON}")
+  titles=$(jq -r '.watching[]?.title' <<<"${json}")
 
   if ! grep -qxF "${SERIES}" <<<"${titles}" 2>/dev/null; then
     local confirmAddToWatchList
@@ -719,15 +724,11 @@ addToWatchList() {
     )
 
     if [[ ${confirmAddToWatchList} == 'Yes' ]]; then
-      [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
-      local list
-      list=$(cat "${LIST_JSON}")
-
       jq \
         --arg url "${SERIES_URL}" \
         --arg title "${SERIES}" \
         --arg extractor "${EXTRACTOR}" \
-        '.watching += [{ $url, $title, $extractor }]' <<<"${list}" \
+        '.watching += [{ $url, $title, $extractor }]' <<<"${json}" \
         >"${LIST_JSON}"
 
       assertSuccess 'Series added to watching list'
