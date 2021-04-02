@@ -60,6 +60,7 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* --{ Shell Script Global Variables }-- *#
 
+unset ARCHIVE_PATH
 unset DL_LOG
 unset EXTRACTOR
 unset EXTRACTOR_CONFIG
@@ -1024,6 +1025,19 @@ fragmentMonitor() {
 }
 
 download() {
+  local archiveDir
+  local archivePath
+  if [[ ${ARCHIVE_PATH} ]]; then
+    if ! archiveDir=$(
+      cd "$(dirname "${ARCHIVE_PATH}")" 2>/dev/null && pwd
+    ); then
+      assertError 'cannot access the provided directory for download-archive!'
+      exit 1
+    fi
+
+    archivePath=${archiveDir}/$(basename "${ARCHIVE_PATH}")
+  fi
+
   if [[ ${DOWNLOAD_DIR} || ${MAKE_SUB_DIR} != 0 ]]; then
     assertTask 'Changing directory...'
 
@@ -1045,9 +1059,11 @@ download() {
 
   #* Keep the following archive variables here.
   #* They must refer to the active directory
-  local archivePath=${PWD}/archive.txt
-  local archiveDir
-  archiveDir=$(dirname "${archivePath}")
+  if [[ ! ${ARCHIVE_PATH} ]]; then
+    archivePath=${PWD}/archive.txt
+    archiveDir=$(dirname "${archivePath}")
+  fi
+
   local archiveExtra=${archivePath%.txt}-extra.txt
   # --***-- #
 
@@ -1568,6 +1584,11 @@ while [[ $1 ]]; do
     ARGS=("${@:2}")
     for index in "${!ARGS[@]}"; do
       [[ ${ARGS[${index}]} ]] || unset "ARGS[${index}]"
+      if [[ ${ARGS[${index}]} == '--download-archive' ]]; then
+        readonly ARCHIVE_PATH=${ARGS[${index} + 1]}
+        unset "ARGS[${index}]"
+        unset "ARGS[${index} + 1]"
+      fi
     done
     readonly ARGS
     shift
