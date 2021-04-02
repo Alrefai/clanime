@@ -1064,7 +1064,8 @@ download() {
     archiveDir=$(dirname "${archivePath}")
   fi
 
-  local archiveExtra=${archivePath%.txt}-extra.txt
+  local archiveFileExt=${archivePath##*.}
+  local archiveExtra=${archivePath%.*}-extra.${archiveFileExt}
   # --***-- #
 
   assertTask 'Downloading with youtube-dl...'
@@ -1074,13 +1075,7 @@ download() {
   fi
 
   if [[ -w ${archiveDir} ]]; then
-    if grep -q '.txt$' <<<"${archivePath}"; then
-      assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
-    else
-      assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
-      assertError "download archive file extension must be '.txt'"
-      exit 1
-    fi
+    assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
   else
     assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
     assertError 'invalid download archive path.' \
