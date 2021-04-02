@@ -363,7 +363,7 @@ parsePlaylistIndex() {
       grep '^--format ' |
       tail -n 1 |
       awk '{print $2}' |
-      sed -e "s/'//g" -e 's/"//g'
+      sed -E "s/'|\"//g"
   )
 
   if [[ ${format} ]]; then
@@ -1029,7 +1029,7 @@ download() {
   local archivePath
   if [[ ${ARCHIVE_PATH} ]]; then
     if ! archiveDir=$(
-      cd "$(dirname "${ARCHIVE_PATH}")" 2>/dev/null && pwd
+      cd "$(dirname "$(eval "echo ${ARCHIVE_PATH}")")" 2>/dev/null && pwd
     ); then
       assertError 'cannot access the provided directory for download-archive!'
       exit 1
@@ -1060,8 +1060,25 @@ download() {
   #* Keep the following archive variables here.
   #* They must refer to the active directory
   if [[ ! ${ARCHIVE_PATH} ]]; then
-    archivePath=${PWD}/archive.txt
-    archiveDir=$(dirname "${archivePath}")
+    if archiveFromConfig=$(
+      grep '^--download-archive ' "$1" |
+        tail -n 1 |
+        awk '{print $2}' |
+        sed -E "s/'|\"//g"
+    ); then
+
+      if ! archiveDir=$(
+        cd "$(dirname "$(eval "echo ${archiveFromConfig}")")" 2>/dev/null && pwd
+      ); then
+        assertError 'cannot access the provided directory for download-archive!'
+        exit 1
+      fi
+
+      archivePath=${archiveDir}/$(basename "${archiveFromConfig}")
+    else
+      archivePath=${PWD}/archive.txt
+      archiveDir=$(dirname "${archivePath}")
+    fi
   fi
 
   local archiveFileExt=${archivePath##*.}
