@@ -10,7 +10,6 @@ readonly CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
 readonly CONFIG_DIR=${CONFIG_HOME}/clanime
 readonly INDEX_DIR=${CACHE_DIR}/playlist-index
 readonly LIST_JSON=${CONFIG_DIR}/list.json
-readonly DL_LOG=${CACHE_DIR}/download-log.txt
 
 #* --{ User Settings with Environment Variables }-- *#
 
@@ -61,6 +60,7 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* --{ Shell Script Global Variables }-- *#
 
+unset DL_LOG
 unset EXTRACTOR
 unset EXTRACTOR_CONFIG
 unset SERIES
@@ -1045,14 +1045,17 @@ download() {
 
   #* Keep the following archive variables here.
   #* They must refer to the active directory
-  local archivePath="${PWD}/archive.txt"
+  local archivePath=${PWD}/archive.txt
   local archiveDir
-  archiveDir="$(dirname "${archivePath}")"
-  local archiveExtra="${archivePath%.txt}-extra.txt"
+  archiveDir=$(dirname "${archivePath}")
+  local archiveExtra=${archivePath%.txt}-extra.txt
   # --***-- #
 
   assertTask 'Downloading with youtube-dl...'
-  assertSuccess 'Download log file:' "${DL_LOG/#$HOME/\~}"
+  if ! DL_LOG=$(mktemp -t "clanime-$(date '+%Y-%m-%d_%s').log"); then
+    assertError 'could not create a download log temporary file!'
+    exit 1
+  fi
 
   if [[ -w ${archiveDir} ]]; then
     if grep -q '.txt$' <<<"${archivePath}"; then
@@ -1158,6 +1161,8 @@ download() {
       "1 second... \r"
     sleep 1
   done
+
+  rm -- "${DL_LOG}" 2>/dev/null
 }
 
 downloadOrStream() {
@@ -1169,7 +1174,11 @@ downloadOrStream() {
   )}
 
   local concatConf
-  concatConf=$(mktemp -t clanime.conf)
+  if ! concatConf=$(mktemp -t "clanime-$(date '+%Y-%m-%d_%s').conf"); then
+    assertError 'could not create a concatenated config temporary file!'
+    exit 1
+  fi
+
   cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" "${SERIES_CONFIG}" \
     >"${concatConf}" 2>/dev/null
 
