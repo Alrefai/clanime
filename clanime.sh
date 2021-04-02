@@ -60,6 +60,7 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* --{ Shell Script Global Variables }-- *#
 
+unset ARCHIVE_PATH
 unset DL_LOG
 unset EXTRACTOR
 unset EXTRACTOR_CONFIG
@@ -362,7 +363,7 @@ parsePlaylistIndex() {
       grep '^--format ' |
       tail -n 1 |
       awk '{print $2}' |
-      sed -e "s/'//g" -e 's/"//g'
+      sed -E "s/'|\"//g"
   )
 
   if [[ ${format} ]]; then
@@ -1024,6 +1025,19 @@ fragmentMonitor() {
 }
 
 download() {
+  local archiveDir
+  local archivePath
+  if [[ ${ARCHIVE_PATH} ]]; then
+    if ! archiveDir=$(
+      cd "$(dirname "$(eval "echo ${ARCHIVE_PATH}")")" 2>/dev/null && pwd
+    ); then
+      assertError 'cannot access the provided directory for download-archive!'
+      exit 1
+    fi
+
+    archivePath=${archiveDir}/$(basename "${ARCHIVE_PATH}")
+  fi
+
   if [[ ${DOWNLOAD_DIR} || ${MAKE_SUB_DIR} != 0 ]]; then
     assertTask 'Changing directory...'
 
@@ -1045,10 +1059,30 @@ download() {
 
   #* Keep the following archive variables here.
   #* They must refer to the active directory
-  local archivePath=${PWD}/archive.txt
-  local archiveDir
-  archiveDir=$(dirname "${archivePath}")
-  local archiveExtra=${archivePath%.txt}-extra.txt
+  if [[ ! ${ARCHIVE_PATH} ]]; then
+    if archiveFromConfig=$(
+      grep '^--download-archive ' "$1" |
+        tail -n 1 |
+        awk '{print $2}' |
+        sed -E "s/'|\"//g"
+    ); then
+
+      if ! archiveDir=$(
+        cd "$(dirname "$(eval "echo ${archiveFromConfig}")")" 2>/dev/null && pwd
+      ); then
+        assertError 'cannot access the provided directory for download-archive!'
+        exit 1
+      fi
+
+      archivePath=${archiveDir}/$(basename "${archiveFromConfig}")
+    else
+      archivePath=${PWD}/archive.txt
+      archiveDir=$(dirname "${archivePath}")
+    fi
+  fi
+
+  local archiveFileExt=${archivePath##*.}
+  local archiveExtra=${archivePath%.*}-extra.${archiveFileExt}
   # --***-- #
 
   assertTask 'Downloading with youtube-dl...'
@@ -1058,13 +1092,7 @@ download() {
   fi
 
   if [[ -w ${archiveDir} ]]; then
-    if grep -q '.txt$' <<<"${archivePath}"; then
-      assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
-    else
-      assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
-      assertError "download archive file extension must be '.txt'"
-      exit 1
-    fi
+    assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
   else
     assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
     assertError 'invalid download archive path.' \
@@ -1568,6 +1596,11 @@ while [[ $1 ]]; do
     ARGS=("${@:2}")
     for index in "${!ARGS[@]}"; do
       [[ ${ARGS[${index}]} ]] || unset "ARGS[${index}]"
+      if [[ ${ARGS[${index}]} == '--download-archive' ]]; then
+        readonly ARCHIVE_PATH=${ARGS[${index} + 1]}
+        unset "ARGS[${index}]"
+        unset "ARGS[${index} + 1]"
+      fi
     done
     readonly ARGS
     shift
