@@ -3,6 +3,7 @@
 #* --{ Shell Script Settings }-- *#
 
 set -o pipefail
+shopt -s extglob
 
 readonly CACHE_HOME=${XDG_CACHE_HOME:-${HOME}/.cache}
 readonly CACHE_DIR=${CACHE_HOME}/clanime
@@ -864,12 +865,17 @@ archiveVideoID() {
 renameSubtitles() {
   if [[ ${ISO_SUB} != 0 ]]; then
     renaming() {
-      for file in *.[a-z][a-z][A-Z][A-Z].ass; do
-        [[ -f ${file} ]] && echo \
-          "${CYAN_TXT}[${MAGENTA_BOLD_TXT}" \
-          "rename subtitle to ISO 639-1" \
-          "${CYAN_TXT}]${RESET}" \
-          "$(mv -v -- "${file}" "${file%[A-Z][A-Z].ass}.ass")"
+      for file in *.[a-z][a-z][A-Z][A-Z].@(ass|srt|vtt|lrc); do
+        if [[ -f ${file} ]]; then
+          local fileExtension=${file##*.}
+          echo \
+            "${CYAN_TXT}[${MAGENTA_BOLD_TXT}" \
+            "rename subtitle to ISO 639-1" \
+            "${CYAN_TXT}]${RESET}" "$(
+              mv -v -- "${file}" "${file%[A-Z][A-Z].*}.${fileExtension}" |
+                awk -F ' -> ' '{print $2}'
+            )"
+        fi
       done 2>/dev/null
     }
 
