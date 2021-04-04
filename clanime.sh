@@ -899,22 +899,26 @@ processFragmentedDownload() {
   local patterns=$2
   local archivePath=$3
 
-  local line
-  while IFS= read -r line; do
-    if [[ $line != *'mp4'* ]]; then
-      assertError 'invalid list of fragmented files!'
-      exit 1
-    fi
-  done <<<"${fragmentedDownload}"
+  local fileExtension=${fragmentedDownload##*.}
+  local fragmentedFiles
+  fragmentedFiles=$(
+    find -- "${fragmentedDownload%${fileExtension}}"*"${fileExtension}"* \
+      2>/dev/null
+  )
+
+  if [[ ! ${fileExtension} =~ (mp4|mkv|webm|ogg) ]] ||
+    [[ ! ${fragmentedFiles} ]]; then
+    assertError 'invalid list of fragmented files!'
+    exit 1
+  fi
 
   local filesToDelete
   if [[ ${DELETE_FRAG} != 0 ]]; then
-    filesToDelete=$(find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null)
+    filesToDelete=${fragmentedFiles}
   else
     local header='Found more than one file. Select one or more files to delete:'
     filesToDelete=$(
-      find -- "${fragmentedDownload%mp4}"*mp4* 2>/dev/null |
-        fzf -m --no-select-1 --header "${header}"
+      fzf -m --no-select-1 --header "${header}" <<<"${fragmentedFiles}"
     )
   fi
 
@@ -991,7 +995,7 @@ processFragmentedDownload() {
     fi
 
   else
-    assertMissing 'Canceled by user'
+    assertMissing 'Deleting fragmented files was canceled!'
   fi
 }
 
@@ -1153,8 +1157,8 @@ download() {
           '/^\[download\] Destination/{a=$0}/'"${patterns}"'/{print a"\n"$0}' \
           "${DL_LOG}" |
           grep -F '[download] Destination' |
+          head -n 1 |
           awk -F ': ' '{print $2}' |
-          sort --unique |
           tr -d '\r'
       )
 
