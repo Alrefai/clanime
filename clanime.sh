@@ -209,8 +209,9 @@ confirmModifiers() {
   until [[ ${playlistModifier} ]]; do
     if ! playlistModifier=$(selectModifiers "${@:2}"); then
       assertTryAgain
-    elif grep -q '^--playlist-items' <<<"${playlistModifier}" &&
-      grep -qE '^--playlist-(start|end)' <<<"${playlistModifier}"; then
+    elif grep -q '^--playlist-items' <<<"${playlistModifier}" 2>/dev/null &&
+      grep -qE '^--playlist-(start|end)' <<<"${playlistModifier}" \
+        2>/dev/null; then
       assertMissing 'Do not use --playlist-item with --playlist-(start|end)'
       unset playlistModifier
       assertTryAgain
@@ -493,14 +494,14 @@ customizeConfigFile() {
   local configOptions
   configOptions=$(ytdlConfOptions)
 
-  if grep -q '^--format' <<<"${configOptions}"; then
+  if grep -q '^--format' <<<"${configOptions}" 2>/dev/null; then
     assertTask 'Awaiting user selection for format filter...'
     playlistFormat
   fi
 
   createIndexFile() {
     [[ -d ${INDEX_DIR} ]] ||
-      if ! mkdir -p "${INDEX_DIR}"; then
+      if ! mkdir -p "${INDEX_DIR}" 2>/dev/null; then
         assertError 'could not create index directory in path:' "${INDEX_DIR}"
         exit 1
       fi
@@ -520,7 +521,7 @@ customizeConfigFile() {
     fi
   }
 
-  if grep -q '^--playlist' <<<"${configOptions}"; then
+  if grep -q '^--playlist' <<<"${configOptions}" 2>/dev/null; then
     local indexFile
     assertTask 'Finding local playlist index...'
 
@@ -555,7 +556,7 @@ customizeConfigFile() {
     playlistSelection "${indexFile}"
   fi
 
-  if grep -q '^--output' <<<"${configOptions}"; then
+  if grep -q '^--output' <<<"${configOptions}" 2>/dev/null; then
     assertTask 'Awaiting user selection for output template...'
     outputTemplate
   fi
@@ -804,11 +805,12 @@ stream() {
   local mpvConf="${HOME}/.config/mpv/mpv.conf"
 
   if [[ ! -f ${mpvConf} ]]; then
-    assertMissing "MPV config file not found!\n"
-    assertTask 'Creating MPV config templates...'
-    mkdir -p ~/.config/mpv
-    cp -ir /usr/local/share/doc/mpv/ ~/.config/mpv/
-    assertSuccess 'MPV config file:' "${mpvConf/#$HOME/\~}"
+    if mkdir -p ~/.config/mpv 2>/dev/null; then
+      assertMissing "MPV config file not found!\n"
+      assertTask 'Creating MPV config templates...'
+      cp -ir /usr/local/share/doc/mpv/ ~/.config/mpv/
+      assertSuccess 'MPV config file:' "${mpvConf/#$HOME/\~}"
+    fi
   fi
 
   local mpvArgs=(
@@ -816,7 +818,7 @@ stream() {
     "${@:2}"
   )
 
-  if grep -qxF "[${EXTRACTOR%\:*}]" "${mpvConf}"; then
+  if grep -qxF "[${EXTRACTOR%\:*}]" "${mpvConf}" 2>/dev/null; then
     assertSuccess "'${EXTRACTOR%\:*}' profile was found in MPV config file"
     mpvArgs=("--profile=${EXTRACTOR%\:*}" "${mpvArgs[@]}")
   fi
@@ -842,7 +844,7 @@ archiveVideoID() {
   local archivePath=$1
   local archiveExtra=$2
 
-  if grep -qF 'requested format not available' "${DL_LOG}"; then
+  if grep -qF 'requested format not available' "${DL_LOG}" 2>/dev/null; then
     echo
     assertTask 'Adding video-IDs with no matching format to archive...'
     local formatNotAvailableIDs
@@ -927,7 +929,9 @@ processFragmentedDownload() {
     pluralFile=$(isPlural "${filesToDelete}")
     assertTask "Deleting fragmented file${pluralFile} from disk..."
     local foundPattern
-    foundPattern=$(grep -oE "${patterns}" "${DL_LOG}" | sort --unique)
+    foundPattern=$(
+      grep -oE "${patterns}" "${DL_LOG}" 2>/dev/null | sort --unique
+    )
 
     if [[ ${foundPattern} ]]; then
       local pattern
@@ -978,7 +982,7 @@ processFragmentedDownload() {
         assertSuccess 'Backup:' "$(cp -v -- "${archivePath/#$HOME/\~}"{,.bak})"
         sed -ni "/^${fragmentedID}$/!p" "${archivePath}"
 
-        if ! grep -qxF "${fragmentedID}" "${archivePath}"; then
+        if ! grep -qxF "${fragmentedID}" "${archivePath}" 2>/dev/null; then
           assertSuccess 'Removed ID:' "${fragmentedID}"
         else
           assertMissing 'Could not remove ID:' "${fragmentedID}"
@@ -1004,13 +1008,13 @@ fragmentMonitor() {
   local downloadPID=$2
   local ytdArgs=$3
 
-  until grep -qE "${patterns}" "${DL_LOG}"; do
+  until grep -qE "${patterns}" "${DL_LOG}" 2>/dev/null; do
     sleep 1
 
     if ! pgrep -qP "${downloadPID}"; then
       #! This check is important!
       # In case youtube-dl was terminated before an error pattern was catched.
-      grep -qE "${patterns}" "${DL_LOG}" && break
+      grep -qE "${patterns}" "${DL_LOG}" 2>/dev/null && break
       return 0
     fi
   done
@@ -1051,14 +1055,14 @@ download() {
   if [[ ${DOWNLOAD_DIR} || ${MAKE_SUB_DIR} != 0 ]]; then
     assertTask 'Changing directory...'
 
-    [[ ${DOWNLOAD_DIR} ]] && if ! cd "${DOWNLOAD_DIR}"; then
+    [[ ${DOWNLOAD_DIR} ]] && if ! cd "${DOWNLOAD_DIR}" 2>/dev/null; then
       assertError 'could not change to Clanime Downloads directory'
       exit 1
     fi
 
     if [[ ${MAKE_SUB_DIR} != 0 ]]; then
-      [[ -d ${SERIES} ]] || mkdir "${SERIES}"
-      if ! cd "${SERIES}"; then
+      mkdir -p "${SERIES}" 2>/dev/null
+      if ! cd "${SERIES}" 2>/dev/null; then
         assertError 'could not change to series directory'
         exit 1
       fi
@@ -1071,7 +1075,7 @@ download() {
   #* They must refer to the active directory
   if [[ ! ${ARCHIVE_PATH} ]]; then
     if archiveFromConfig=$(
-      grep '^--download-archive ' "$1" |
+      grep '^--download-archive ' "$1" 2>/dev/null |
         tail -n 1 |
         awk '{print $2}' |
         sed -E "s/'|\"//g"
@@ -1086,8 +1090,8 @@ download() {
 
       archivePath=${archiveDir}/$(basename "${archiveFromConfig}")
     else
-      archivePath=${PWD}/archive.txt
-      archiveDir=$(dirname "${archivePath}")
+      archiveDir=${PWD}
+      archivePath=${archiveDir}/archive.txt
     fi
   fi
 
@@ -1633,17 +1637,27 @@ done
   assertMissing 'Clanime Downloads directory:' "${DOWNLOAD_DIR}"
   assertError 'Clanime Downloads directory not found'
   exit 1
+elif [[ ! -w ${DOWNLOAD_DIR} ]]; then
+  assertError 'you do not have permission to write files in the configured ' \
+    'Clanime Downloads directory.'
+  exit 1
 fi
 
 if [[ ! -d ${CONFIG_DIR} ]]; then
-  assertTask "Creating 'config' directory..."
-  mkdir -p "${CONFIG_DIR}"
+  assertTask 'Creating config directory...'
+  if ! mkdir -p "${CONFIG_DIR}" 2>/dev/null; then
+    assertError 'could not create config directory:' "${CONFIG_DIR}"
+    exit 1
+  fi
   assertSuccess 'Config directory:' "${CONFIG_DIR}\n"
 fi
 
 if [[ ! -d ${CACHE_DIR} ]]; then
-  assertTask "Creating 'cache' directory..."
-  mkdir -p "${CACHE_DIR}"
+  assertTask "Creating cache directory..."
+  if ! mkdir -p "${CACHE_DIR}" 2>/dev/null; then
+    assertError 'could not create cache directory:' "${CACHE_DIR}"
+    exit 1
+  fi
   assertSuccess 'Cache directory:' "${CACHE_DIR}\n"
 fi
 
