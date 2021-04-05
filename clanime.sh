@@ -717,11 +717,11 @@ addToWatchList() {
   if ! grep -qxF "${SERIES}" <<<"${titles}" 2>/dev/null; then
     local confirmAddToWatchList
     confirmAddToWatchList=$(
-      assertSelection '
-        Do you want to add this series to watching list?
+      assertSelection "
+        Do you want to add this series to 'Watching' list?
         Yes
         No
-      ' --header-lines 1
+      " --header-lines 1
     )
 
     if [[ ${confirmAddToWatchList} == 'Yes' ]]; then
@@ -732,7 +732,7 @@ addToWatchList() {
         '.watching += [{ $url, $title, $extractor }]' <<<"${json}" \
         >"${LIST_JSON}"
 
-      assertSuccess 'Series added to watching list'
+      assertSuccess "Series added to 'Watching' list"
       assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}\n"
     else
       echo
@@ -747,7 +747,7 @@ addToWatchList() {
         <<<"${json}"
     )
 
-    assertSuccess "Series is in '${list}' list"
+    assertSuccess "Series found in '${list^}' list"
     assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}\n"
   fi
 }
@@ -1246,10 +1246,11 @@ downloadOrStream() {
 }
 
 selectFromList() {
-  local selectedList=$1
-
   local json
   json=$(cat "${LIST_JSON}")
+
+  local selectedList
+  selectedList=$(jq -cr 'keys[]' <<<"${json}" | grep -ixF "$1")
 
   SERIES=$(
     jq --arg list "${selectedList}" -cr '.[$list][].title' <<<"${json}" | fzf
@@ -1314,18 +1315,24 @@ moveToList() {
 
   if [[ ${from} ]]; then
     if ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${from}"; then
-      assertError "${from} list is not available!"
+      assertError "'${from}' list is not available!"
       exit 1
     fi
   else
-    if ! from=$(
+    local fromList
+    if ! fromList=$(
       assertSelection "
         $([[ ${to} == 'delete' ]] && echo 'Delete' || echo 'Move') series from:
         $(browseListAll <<<"${json}" | grep -vxF "${to^} List")
-      " --header-lines 1 | awk '{print tolower($1)}'
+      " --header-lines 1 | sed 's/ List$//'
     ); then
       assertMissing 'Aborted by user'
       exit
+    fi
+
+    if ! from=$(jq -cr 'keys[]' <<<"${json}" | grep -ixF "${fromList}"); then
+      assertError "'${from}' list is not available!"
+      exit 1
     fi
   fi
 
@@ -1342,7 +1349,7 @@ moveToList() {
   fi
 
   if [[ ${series} == '[]' ]]; then
-    assertMissing 'Nothing in the list!'
+    assertMissing 'Transfer process was canceled!'
     exit
   fi
 
@@ -1356,18 +1363,24 @@ moveToList() {
   if [[ ${to} ]]; then
     if [[ ${to} != 'delete' ]] &&
       ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${to}"; then
-      assertError "${to} list is not available!"
+      assertError "'${to}' list is not available!"
       exit 1
     fi
   else
-    if ! to=$(
+    local toList
+    if ! toList=$(
       assertSelection "
         Move series to:
         $(browseListAll <<<"${json}" | grep -vxF "${from^} List")
-      " --header-lines 1 | awk '{print tolower($1)}'
+      " --header-lines 1 | sed 's/ List$//'
     ); then
       assertMissing 'Aborted by user'
       exit
+    fi
+
+    if ! to=$(jq -cr 'keys[]' <<<"${json}" | grep -ixF "${toList}"); then
+      assertError "'${to}' list is not available!"
+      exit 1
     fi
   fi
 
@@ -1389,7 +1402,7 @@ moveToList() {
 
   if [[ ${to} == 'delete' ]]; then
     assertWarning 'the following series will be permanently deleted from' \
-      "${from} List"
+      "'${from^}' list"
     jq -cr 'map("- "+.)[]' <<<"${series}"
 
     confirmDelete=$(
@@ -1408,7 +1421,7 @@ moveToList() {
         assertError
         exit 1
       else
-        assertSuccess "Series deleted from ${from} list"
+        assertSuccess "Series deleted from '${from^}' list"
         return
       fi
     else
@@ -1425,7 +1438,7 @@ moveToList() {
     assertError
     exit 1
   else
-    assertSuccess "Series moved from ${from} list to ${to} list"
+    assertSuccess "Series transfered from '${from^}' list to '${to^}' list"
     if [[ ! ${SERIES} ]]; then
       jq -cr 'map("- "+.)[]' <<<"${series}"
     else
@@ -1448,8 +1461,8 @@ browse() {
   if [[ ! $1 ]]; then
     exit 1
   else
-    assertTask "Awaiting user selection from ${1,,} list..."
-    selectFromList "${1,,}"
+    assertTask "Awaiting user selection from '${1^}' list..."
+    selectFromList "$1"
 
     if [[ $1 == 'Archive' ]]; then
       local confirmMove
@@ -1480,7 +1493,7 @@ configProcessOptions() {
   )
 
   assertSuccess "Process series config from: ${processOption}\n"
-  browse "$(awk '{print $1}' <<<"${processOption}")"
+  browse "${processOption%' List'}"
 
   while true; do
     processConfig
@@ -1706,7 +1719,7 @@ elif [[ ${MAIN} == 'Move Series to Archive' ]]; then
 
 elif [[ ${MAIN} != 'Process'* ]]; then
   assertSuccess "Browse: ${MAIN}\n"
-  browse "$(awk '{print $1}' <<<"${MAIN}")"
+  browse "${MAIN%' List'}"
   processConfig
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
 
