@@ -80,6 +80,7 @@ readonly RED_BOLD_TXT=$'\e[1;31m'
 readonly BLUE_TXT=$'\e[34m'
 readonly RED_UNDERLINE_TXT=$'\e[4;31m'
 readonly CYAN_TXT=$'\e[36m'
+readonly CYAN_BOLD_TXT=$'\e[1;36m'
 readonly MAGENTA_BOLD_TXT=$'\e[1;35m'
 readonly MAGENTA_BG_BLACK_TXT=$'\e[45;30m'
 readonly YELLOW_BOLD_TXT=$'\e[1;33m'
@@ -123,6 +124,10 @@ assertMissing() {
 
 assertWarning() {
   echo -e "${YELLOW_BOLD_TXT}WARNING${RESET}${BOLD_TXT}: $*${RESET}"
+}
+
+assertTip() {
+  echo -e "${CYAN_BOLD_TXT}Tip${RESET}${BOLD_TXT}: $*${RESET}"
 }
 
 assertError() {
@@ -189,6 +194,10 @@ readPrompt() {
 
 isPlural() {
   test "$(wc -l <<<"$1")" -gt 1 && echo s
+}
+
+isPositiveInteger() {
+  [[ $1 == +([0-9]) && (($1 -gt 0)) ]]
 }
 
 selectModifiers() {
@@ -1043,7 +1052,7 @@ download() {
   local archivePath
   if [[ ${ARCHIVE_PATH} ]]; then
     if ! archiveDir=$(
-      cd "$(dirname "$(eval "echo ${ARCHIVE_PATH}")")" 2>/dev/null && pwd
+      cd "$(dirname "$(eval echo "${ARCHIVE_PATH}")")" 2>/dev/null && pwd
     ); then
       assertError 'cannot access the provided directory for download-archive!'
       exit 1
@@ -1082,7 +1091,7 @@ download() {
     ); then
 
       if ! archiveDir=$(
-        cd "$(dirname "$(eval "echo ${archiveFromConfig}")")" 2>/dev/null && pwd
+        cd "$(dirname "$(eval echo "${archiveFromConfig}")")" 2>/dev/null && pwd
       ); then
         assertError 'cannot access the provided directory for download-archive!'
         exit 1
@@ -1114,30 +1123,48 @@ download() {
     exit 1
   fi
 
-  local ytdArgs=(
+  promptAutonumber() {
+    local number
+    number=$(readPrompt '--autonumber-start ' '1')
+    isPositiveInteger "${number}" && echo "${number}"
+  }
+
+  youtubeDl() {
+    #! Keep the following command inside this function!
+    #* Otherwise, user won't be able to interrupt download process with CTL+C.
+    script -q "${DL_LOG}" youtube-dl "$@"
+  }
+
+  local ytdArgsModel=(
     '--config-location' "$1"
     '--download-archive' "${archivePath}"
     "${@:2}"
   )
 
-  [[ ! $* =~ '--autonumber-start ' ]] &&
-    if grep -qF '%(autonumber)' "$1" 2>/dev/null; then
-      assertError 'you are using "autonumber" in filename output.' \
-        'Pass the next episode number with "--autonumber-start" option.'
-      exit 1
-    fi
-
-  youtubeDl() {
-    #! Keep the following command inside this function!
-    #* Otherwise, user won't be able to interrupt download process with CTL+C.
-    script -q "${DL_LOG}" youtube-dl "${ytdArgs[@]}"
-  }
-
   local patterns
   patterns=$(trimWhiteSpace "${YTD_ERRORS}" | paste -sd '|' -)
 
-  for retry in {1..11}; do
-    youtubeDl &
+  local maxAttempts=10
+  for retry in $(eval echo "{1..$((maxAttempts + 1))}"); do
+    if [[ ! $* =~ '--autonumber-start ' ]] &&
+      grep -qE '^\s*(--output |-o ).*%\(autonumber\)' "${SERIES_CONFIG}" \
+        2>/dev/null; then
+      assertWarning "You are using 'autonumber' in filename output."
+      assertTip "pass the next episode number with 'autonumber-start' option.\n"
+      readHeader 'Edit the number below (then press [ENTER])'
+
+      local startNumber
+      until startNumber=$(promptAutonumber); do
+        assertMissing 'Invalid autonumber-start value!' \
+          'It must be an integer number that is greater than 0.'
+      done
+
+      local ytdArgs=('--autonumber-start' "${startNumber}" "${ytdArgsModel[@]}")
+    else
+      local ytdArgs=("${ytdArgsModel[@]}")
+    fi
+
+    youtubeDl "${ytdArgs[@]}" &
     local youtubeDLPID=$!
 
     until pgrep -qf -- 'youtube-dl' "${ytdArgs[@]}"; do
@@ -1172,12 +1199,24 @@ download() {
 
     wait "${youtubeDLPID}" "${renameSubtitlesPID}"
     archiveVideoID "${archivePath}" "${archiveExtra}"
-    [[ ! ${fragmentedDownload} ]] && break
+    [[ $* =~ '--autonumber-start ' ]] && break
+
+    local error403='HTTP Error 403: Forbidden'
+    if ! grep -qF "${error403}" "${DL_LOG}" 2>/dev/null; then
+      [[ ! ${fragmentedDownload} ]] && break
+    else
+
+      if grep -q '^--cookies ' "${EXTRACTOR_CONFIG}" 2>/dev/null ||
+        [[ $* =~ '--cookies ' ]]; then
+        echo
+        assertTip 'provide new cookies!'
+      fi
+      assertTryAgain
+    fi
+
     unset fragmentedDownload
     unset youtubeDLPID
     unset renameSubtitlesPID
-
-    [[ $* =~ '--autonumber-start ' ]] && break
 
     if [[ ${retry} -gt 10 ]]; then
       assertError 'maximum retry attempts reached. Try again later!'
@@ -1609,7 +1648,7 @@ while [[ $1 ]]; do
     ;;
 
   --parse-index)
-    if [[ $2 == +([0-9]) && (($2 -gt 0)) ]]; then
+    if isPositiveInteger "$2"; then
       readonly PARSE_INDEX_START=$2
       shift
     else
