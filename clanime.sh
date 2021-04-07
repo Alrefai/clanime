@@ -61,6 +61,7 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* --{ Shell Script Global Variables }-- *#
 
+unset AUTONUMBER
 unset ARCHIVE_PATH
 unset DL_LOG
 unset EXTRACTOR
@@ -197,7 +198,7 @@ isPlural() {
 }
 
 isPositiveInteger() {
-  [[ $1 == +([0-9]) && (($1 -gt 0)) ]]
+  [[ $1 == +([0-9]) && (($1 -gt 0)) ]] && echo "$1"
 }
 
 selectModifiers() {
@@ -1126,7 +1127,7 @@ download() {
   promptAutonumber() {
     local number
     number=$(readPrompt '--autonumber-start ' '1')
-    isPositiveInteger "${number}" && echo "${number}"
+    isPositiveInteger "${number}"
   }
 
   youtubeDl() {
@@ -1144,24 +1145,33 @@ download() {
   local patterns
   patterns=$(trimWhiteSpace "${YTD_ERRORS}" | paste -sd '|' -)
 
+  local isAutonumber
+  isAutonumber=$(
+    grep -E '^\s*(--output |-o ).*%\(autonumber\)' "${SERIES_CONFIG}" \
+      2>/dev/null
+  )
+
+  local startNumber=${AUTONUMBER}
   local maxAttempts=10
+
   for retry in $(eval echo "{1..$((maxAttempts + 1))}"); do
-    if [[ ! $* =~ '--autonumber-start ' ]] &&
-      grep -qE '^\s*(--output |-o ).*%\(autonumber\)' "${SERIES_CONFIG}" \
-        2>/dev/null; then
-      assertWarning "You are using 'autonumber' in filename output."
+    local ytdArgs
+    if [[ ${startNumber} ]]; then
+      ytdArgs=('--autonumber-start' "${startNumber}" "${ytdArgsModel[@]}")
+
+    elif [[ ${isAutonumber} ]]; then
+      assertWarning "you are using 'autonumber' in filename output."
       assertTip "pass the next episode number with 'autonumber-start' option.\n"
       readHeader 'Edit the number below (then press [ENTER])'
 
-      local startNumber
       until startNumber=$(promptAutonumber); do
         assertMissing 'Invalid autonumber-start value!' \
           'It must be an integer number that is greater than 0.'
       done
 
-      local ytdArgs=('--autonumber-start' "${startNumber}" "${ytdArgsModel[@]}")
+      ytdArgs=('--autonumber-start' "${startNumber}" "${ytdArgsModel[@]}")
     else
-      local ytdArgs=("${ytdArgsModel[@]}")
+      ytdArgs=("${ytdArgsModel[@]}")
     fi
 
     youtubeDl "${ytdArgs[@]}" &
@@ -1199,7 +1209,6 @@ download() {
 
     wait "${youtubeDLPID}" "${renameSubtitlesPID}"
     archiveVideoID "${archivePath}" "${archiveExtra}"
-    [[ $* =~ '--autonumber-start ' ]] && break
 
     local error403='HTTP Error 403: Forbidden'
     if ! grep -qF "${error403}" "${DL_LOG}" 2>/dev/null; then
@@ -1217,6 +1226,7 @@ download() {
     unset fragmentedDownload
     unset youtubeDLPID
     unset renameSubtitlesPID
+    unset startNumber
 
     if [[ ${retry} -gt 10 ]]; then
       assertError 'maximum retry attempts reached. Try again later!'
@@ -1648,8 +1658,7 @@ while [[ $1 ]]; do
     ;;
 
   --parse-index)
-    if isPositiveInteger "$2"; then
-      readonly PARSE_INDEX_START=$2
+    if readonly PARSE_INDEX_START=$(isPositiveInteger "$2"); then
       shift
     else
       assertError 'invalid parse-index value!' \
@@ -1664,6 +1673,15 @@ while [[ $1 ]]; do
       [[ ${ARGS[${index}]} ]] || unset "ARGS[${index}]"
       if [[ ${ARGS[${index}]} == '--download-archive' ]]; then
         readonly ARCHIVE_PATH=${ARGS[${index} + 1]}
+        unset "ARGS[${index}]"
+        unset "ARGS[${index} + 1]"
+      elif [[ ${ARGS[${index}]} == '--autonumber-start' ]]; then
+        if ! AUTONUMBER=$(isPositiveInteger "${ARGS[${index} + 1]}"); then
+          assertError 'invalid autonumber-start value!' \
+            'It must be an integer number that is greater than 0.'
+          exit 1
+        fi
+        readonly AUTONUMBER
         unset "ARGS[${index}]"
         unset "ARGS[${index} + 1]"
       fi
