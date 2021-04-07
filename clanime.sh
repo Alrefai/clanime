@@ -1147,8 +1147,9 @@ download() {
 
   local isAutonumber
   isAutonumber=$(
-    grep -E '^\s*(--output |-o ).*%\(autonumber\)' "${SERIES_CONFIG}" \
-      2>/dev/null
+    grep -E '\s*(--output |-o ).*%\(autonumber\)' <<<"$*" 2>/dev/null ||
+      grep -E '^\s*(--output |-o ).*%\(autonumber\)' "${SERIES_CONFIG}" \
+        2>/dev/null
   )
 
   local startNumber=${AUTONUMBER}
