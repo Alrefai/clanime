@@ -61,17 +61,21 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* --{ Shell Script Global Variables }-- *#
 
-unset AUTONUMBER
-unset ARCHIVE_PATH
-unset DL_LOG
-unset EXTRACTOR
-unset EXTRACTOR_CONFIG
-unset SERIES
-unset SERIES_URL
-unset SERIES_CONFIG
-unset SUB_COMMAND
-unset ARGS
-unset MAIN
+unset -v AUTONUMBER
+unset -v ARCHIVE_PATH
+unset -v DL_LOG
+unset -v EXTRACTOR
+unset -v EXTRACTOR_CONFIG
+unset -v SERIES
+unset -v SERIES_URL
+unset -v SERIES_CONFIG
+unset -v SUB_COMMAND
+unset -v ARGS
+unset -v MAIN
+
+# Supported video file extentions pattern
+
+readonly SUPPORTED_VIDEO_EXT='mp4|mkv|webm|ogg'
 
 # Font styling and colors
 
@@ -918,7 +922,7 @@ processFragmentedDownload() {
       2>/dev/null
   )
 
-  if [[ ! ${fileExtension} =~ (mp4|mkv|webm|ogg) ]] ||
+  if [[ ! ${fileExtension} =~ (${SUPPORTED_VIDEO_EXT}) ]] ||
     [[ ! ${fragmentedFiles} ]]; then
     assertError 'invalid list of fragmented files!'
     exit 1
@@ -1124,6 +1128,17 @@ download() {
     exit 1
   fi
 
+  findLastVidoAdded() {
+    local file
+    local latest
+
+    for file in *.@(${SUPPORTED_VIDEO_EXT}); do
+      [[ ${file} -nt ${latest} ]] && latest=${file}
+    done 2>/dev/null
+
+    echo "${latest}"
+  }
+
   promptAutonumber() {
     local number
     number=$(readPrompt '--autonumber-start ' '1')
@@ -1162,7 +1177,16 @@ download() {
 
     elif [[ ${isAutonumber} ]]; then
       assertWarning "you are using 'autonumber' in filename output."
-      assertTip "pass the next episode number with 'autonumber-start' option.\n"
+      assertTip "pass the next episode number with 'autonumber-start' option."
+
+      local latest
+      latest=$(findLastVidoAdded)
+      if [[ ${latest} ]]; then
+        assertTip 'the following file is potentially the last episode added!'
+        echo "${latest}"
+      fi
+
+      echo
       readHeader 'Edit the number below (then press [ENTER])'
 
       until startNumber=$(promptAutonumber); do
@@ -1224,10 +1248,11 @@ download() {
       assertTryAgain
     fi
 
-    unset fragmentedDownload
-    unset youtubeDLPID
-    unset renameSubtitlesPID
-    unset startNumber
+    unset -v fragmentedDownload
+    unset -v youtubeDLPID
+    unset -v renameSubtitlesPID
+    unset -v startNumber
+    unset -v latest
 
     if [[ ${retry} -gt 10 ]]; then
       assertError 'maximum retry attempts reached. Try again later!'
