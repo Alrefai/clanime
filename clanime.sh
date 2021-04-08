@@ -1436,7 +1436,7 @@ moveToList() {
   )
 
   if [[ ${to} ]]; then
-    if [[ ${to} != 'delete' ]] &&
+    if [[ ! ${to} =~ ('delete'|'archive') ]] &&
       ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${to}"; then
       assertError "'${to}' list is not available!"
       exit 1
