@@ -61,16 +61,21 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* --{ Shell Script Global Variables }-- *#
 
-unset ARCHIVE_PATH
-unset DL_LOG
-unset EXTRACTOR
-unset EXTRACTOR_CONFIG
-unset SERIES
-unset SERIES_URL
-unset SERIES_CONFIG
-unset SUB_COMMAND
-unset ARGS
-unset MAIN
+unset -v AUTONUMBER
+unset -v ARCHIVE_PATH
+unset -v DL_LOG
+unset -v EXTRACTOR
+unset -v EXTRACTOR_CONFIG
+unset -v SERIES
+unset -v SERIES_URL
+unset -v SERIES_CONFIG
+unset -v SUB_COMMAND
+unset -v ARGS
+unset -v MAIN
+
+# Supported video file extentions pattern
+
+readonly SUPPORTED_VIDEO_EXT='mp4|mkv|webm|ogg'
 
 # Font styling and colors
 
@@ -80,6 +85,7 @@ readonly RED_BOLD_TXT=$'\e[1;31m'
 readonly BLUE_TXT=$'\e[34m'
 readonly RED_UNDERLINE_TXT=$'\e[4;31m'
 readonly CYAN_TXT=$'\e[36m'
+readonly CYAN_BOLD_TXT=$'\e[1;36m'
 readonly MAGENTA_BOLD_TXT=$'\e[1;35m'
 readonly MAGENTA_BG_BLACK_TXT=$'\e[45;30m'
 readonly YELLOW_BOLD_TXT=$'\e[1;33m'
@@ -123,6 +129,10 @@ assertMissing() {
 
 assertWarning() {
   echo -e "${YELLOW_BOLD_TXT}WARNING${RESET}${BOLD_TXT}: $*${RESET}"
+}
+
+assertTip() {
+  echo -e "${CYAN_BOLD_TXT}Tip${RESET}${BOLD_TXT}: $*${RESET}"
 }
 
 assertError() {
@@ -189,6 +199,10 @@ readPrompt() {
 
 isPlural() {
   test "$(wc -l <<<"$1")" -gt 1 && echo s
+}
+
+isPositiveInteger() {
+  [[ $1 == +([0-9]) && (($1 -gt 0)) ]] && echo "$1"
 }
 
 selectModifiers() {
@@ -908,7 +922,7 @@ processFragmentedDownload() {
       2>/dev/null
   )
 
-  if [[ ! ${fileExtension} =~ (mp4|mkv|webm|ogg) ]] ||
+  if [[ ! ${fileExtension} =~ (${SUPPORTED_VIDEO_EXT}) ]] ||
     [[ ! ${fragmentedFiles} ]]; then
     assertError 'invalid list of fragmented files!'
     exit 1
@@ -1043,7 +1057,7 @@ download() {
   local archivePath
   if [[ ${ARCHIVE_PATH} ]]; then
     if ! archiveDir=$(
-      cd "$(dirname "$(eval "echo ${ARCHIVE_PATH}")")" 2>/dev/null && pwd
+      cd "$(dirname "$(eval echo "${ARCHIVE_PATH}")")" 2>/dev/null && pwd
     ); then
       assertError 'cannot access the provided directory for download-archive!'
       exit 1
@@ -1082,7 +1096,7 @@ download() {
     ); then
 
       if ! archiveDir=$(
-        cd "$(dirname "$(eval "echo ${archiveFromConfig}")")" 2>/dev/null && pwd
+        cd "$(dirname "$(eval echo "${archiveFromConfig}")")" 2>/dev/null && pwd
       ); then
         assertError 'cannot access the provided directory for download-archive!'
         exit 1
@@ -1114,30 +1128,78 @@ download() {
     exit 1
   fi
 
-  local ytdArgs=(
+  findLastVidoAdded() {
+    local file
+    local latest
+
+    for file in *.@(${SUPPORTED_VIDEO_EXT}); do
+      [[ ${file} -nt ${latest} ]] && latest=${file}
+    done 2>/dev/null
+
+    echo "${latest}"
+  }
+
+  promptAutonumber() {
+    local number
+    number=$(readPrompt '--autonumber-start ' '1')
+    isPositiveInteger "${number}"
+  }
+
+  youtubeDl() {
+    #! Keep the following command inside this function!
+    #* Otherwise, user won't be able to interrupt download process with CTL+C.
+    script -q "${DL_LOG}" youtube-dl "$@"
+  }
+
+  local ytdArgsModel=(
     '--config-location' "$1"
     '--download-archive' "${archivePath}"
     "${@:2}"
   )
 
-  [[ ! $* =~ '--autonumber-start ' ]] &&
-    if grep -qF '%(autonumber)' "$1" 2>/dev/null; then
-      assertError 'you are using "autonumber" in filename output.' \
-        'Pass the next episode number with "--autonumber-start" option.'
-      exit 1
-    fi
-
-  youtubeDl() {
-    #! Keep the following command inside this function!
-    #* Otherwise, user won't be able to interrupt download process with CTL+C.
-    script -q "${DL_LOG}" youtube-dl "${ytdArgs[@]}"
-  }
-
   local patterns
   patterns=$(trimWhiteSpace "${YTD_ERRORS}" | paste -sd '|' -)
 
-  for retry in {1..11}; do
-    youtubeDl &
+  local isAutonumber
+  isAutonumber=$(
+    grep -E '\s*(--output |-o ).*%\(autonumber\)' <<<"$*" 2>/dev/null ||
+      grep -E '^\s*(--output |-o ).*%\(autonumber\)' "${SERIES_CONFIG}" \
+        2>/dev/null
+  )
+
+  local startNumber=${AUTONUMBER}
+  local maxAttempts=10
+
+  for retry in $(eval echo "{1..$((maxAttempts + 1))}"); do
+    local ytdArgs
+    if [[ ${startNumber} ]]; then
+      ytdArgs=('--autonumber-start' "${startNumber}" "${ytdArgsModel[@]}")
+
+    elif [[ ${isAutonumber} ]]; then
+      assertWarning "you are using 'autonumber' in filename output."
+      assertTip "pass the next episode number with 'autonumber-start' option."
+
+      local latest
+      latest=$(findLastVidoAdded)
+      if [[ ${latest} ]]; then
+        assertTip 'the following file is potentially the last episode added!'
+        echo "${latest}"
+      fi
+
+      echo
+      readHeader 'Edit the number below (then press [ENTER])'
+
+      until startNumber=$(promptAutonumber); do
+        assertMissing 'Invalid autonumber-start value!' \
+          'It must be an integer number that is greater than 0.'
+      done
+
+      ytdArgs=('--autonumber-start' "${startNumber}" "${ytdArgsModel[@]}")
+    else
+      ytdArgs=("${ytdArgsModel[@]}")
+    fi
+
+    youtubeDl "${ytdArgs[@]}" &
     local youtubeDLPID=$!
 
     until pgrep -qf -- 'youtube-dl' "${ytdArgs[@]}"; do
@@ -1172,12 +1234,25 @@ download() {
 
     wait "${youtubeDLPID}" "${renameSubtitlesPID}"
     archiveVideoID "${archivePath}" "${archiveExtra}"
-    [[ ! ${fragmentedDownload} ]] && break
-    unset fragmentedDownload
-    unset youtubeDLPID
-    unset renameSubtitlesPID
 
-    [[ $* =~ '--autonumber-start ' ]] && break
+    local error403='HTTP Error 403: Forbidden'
+    if ! grep -qF "${error403}" "${DL_LOG}" 2>/dev/null; then
+      [[ ! ${fragmentedDownload} ]] && break
+    else
+
+      if grep -q '^--cookies ' "${EXTRACTOR_CONFIG}" 2>/dev/null ||
+        [[ $* =~ '--cookies ' ]]; then
+        echo
+        assertTip 'provide new cookies!'
+      fi
+      assertTryAgain
+    fi
+
+    unset -v fragmentedDownload
+    unset -v youtubeDLPID
+    unset -v renameSubtitlesPID
+    unset -v startNumber
+    unset -v latest
 
     if [[ ${retry} -gt 10 ]]; then
       assertError 'maximum retry attempts reached. Try again later!'
@@ -1609,8 +1684,7 @@ while [[ $1 ]]; do
     ;;
 
   --parse-index)
-    if [[ $2 == +([0-9]) && (($2 -gt 0)) ]]; then
-      readonly PARSE_INDEX_START=$2
+    if readonly PARSE_INDEX_START=$(isPositiveInteger "$2"); then
       shift
     else
       assertError 'invalid parse-index value!' \
@@ -1625,6 +1699,15 @@ while [[ $1 ]]; do
       [[ ${ARGS[${index}]} ]] || unset "ARGS[${index}]"
       if [[ ${ARGS[${index}]} == '--download-archive' ]]; then
         readonly ARCHIVE_PATH=${ARGS[${index} + 1]}
+        unset "ARGS[${index}]"
+        unset "ARGS[${index} + 1]"
+      elif [[ ${ARGS[${index}]} == '--autonumber-start' ]]; then
+        if ! AUTONUMBER=$(isPositiveInteger "${ARGS[${index} + 1]}"); then
+          assertError 'invalid autonumber-start value!' \
+            'It must be an integer number that is greater than 0.'
+          exit 1
+        fi
+        readonly AUTONUMBER
         unset "ARGS[${index}]"
         unset "ARGS[${index} + 1]"
       fi
