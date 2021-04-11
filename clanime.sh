@@ -143,6 +143,8 @@ assertError() {
   else
     echo "$*" >&2
   fi
+
+  return 1
 }
 
 trimWhiteSpace() {
