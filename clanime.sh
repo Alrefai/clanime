@@ -7,6 +7,7 @@ shopt -s extglob
 
 readonly CACHE_HOME=${XDG_CACHE_HOME:-${HOME}/.cache}
 readonly CACHE_DIR=${CACHE_HOME}/clanime
+readonly TMP_DIR_PREFIX=${TMPDIR:-/tmp}/clanime.XXXXXXXXX
 readonly CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
 readonly CONFIG_DIR=${CONFIG_HOME}/clanime
 readonly INDEX_DIR=${CACHE_DIR}/playlist-index
@@ -61,6 +62,7 @@ DELETE_FRAG=${CLANIME_DELETE_FRAG}
 
 #* --{ Shell Script Global Variables }-- *#
 
+unset -v TMP_DIR
 unset -v AUTONUMBER
 unset -v ARCHIVE_PATH
 unset -v DL_LOG
@@ -145,6 +147,16 @@ assertError() {
   fi
 
   return 1
+}
+
+cleanup() {
+  trap - EXIT
+  [[ -d ${TMP_DIR} ]] && rm -rf -- "${TMP_DIR}"
+
+  if [[ $1 ]]; then
+    trap - "$1"
+    kill -"$1" -- -$$ &>/dev/null
+  fi
 }
 
 trimWhiteSpace() {
@@ -1116,10 +1128,7 @@ download() {
   # --***-- #
 
   assertTask 'Downloading with youtube-dl...'
-  if ! DL_LOG=$(mktemp -t "clanime-$(date '+%Y-%m-%d_%s').log"); then
-    assertError 'could not create a download log temporary file!'
-    exit 1
-  fi
+  readonly DL_LOG="${TMP_DIR}/clanime.log"
 
   if [[ -w ${archiveDir} ]]; then
     assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
@@ -1280,8 +1289,6 @@ download() {
       "1 second... \r"
     sleep 1
   done
-
-  rm -- "${DL_LOG}" 2>/dev/null
 }
 
 downloadOrStream() {
@@ -1292,11 +1299,7 @@ downloadOrStream() {
     '
   )}
 
-  local concatConf
-  if ! concatConf=$(mktemp -t "clanime-$(date '+%Y-%m-%d_%s').conf"); then
-    assertError 'could not create a concatenated config temporary file!'
-    exit 1
-  fi
+  local concatConf="${TMP_DIR}/clanime.conf"
 
   cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" "${SERIES_CONFIG}" \
     >"${concatConf}" 2>/dev/null
@@ -1318,8 +1321,6 @@ downloadOrStream() {
   else
     assertTryAgain downloadOrStream "$@"
   fi
-
-  rm -f -- "${concatConf}" 2>/dev/null
 }
 
 selectFromList() {
@@ -1785,7 +1786,19 @@ else
   )
 fi
 
-[[ ${MAIN} ]] || exit 1
+if [[ ! ${MAIN} ]]; then
+  assertMissing 'Aborted!'
+  exit
+elif ! TMP_DIR=$(mktemp -qd "${TMP_DIR_PREFIX}"); then
+  assertError 'could not create temporary directory!'
+  exit 1
+fi
+
+readonly TMP_DIR
+trap 'cleanup' EXIT
+trap 'cleanup HUP' HUP
+trap 'cleanup TERM' TERM
+trap 'cleanup INT' INT
 
 if [[ ${SERIES_URL} ]]; then
   preSelectedSeries
