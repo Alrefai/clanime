@@ -85,6 +85,28 @@ unset -v SUB_COMMAND
 unset -v ARGS
 unset -v MAIN
 
+export FZF_DEFAULT_OPTS="
+  --bind J:down,K:up,ctrl-a:select-all,ctrl-d:deselect-all,ctrl-t:toggle-all \
+  --reverse \
+  --ansi \
+  --no-multi \
+  --height 20% \
+  --min-height 15 \
+  --border \
+  --exit-0 \
+  --info 'inline' \
+  --select-1
+"
+readonly FZF_DEFAULT_OPTS
+
+readonly YTD_ERRORS='
+  Error in the pull function
+  PES packet size mismatch
+  Failed to open segment
+  Unable to open resource
+  Packet corrupt
+'
+
 # Supported video file extentions pattern
 
 readonly SUPPORTED_VIDEO_EXT='mp4|mkv|webm|ogg'
@@ -102,26 +124,6 @@ readonly MAGENTA_BOLD_TXT=$'\e[1;35m'
 readonly MAGENTA_BG_BLACK_TXT=$'\e[45;30m'
 readonly YELLOW_BOLD_TXT=$'\e[1;33m'
 readonly RESET=$'\e[0m'
-
-# shellcheck disable=SC2034
-readonly FZF_DEFAULT_OPTS="
-  --bind J:down,K:up,ctrl-a:select-all,ctrl-d:deselect-all,ctrl-t:toggle-all \
-  --reverse \
-  --ansi \
-  --no-multi \
-  --height 20% \
-  --min-height 15 \
-  --border \
-  --exit-0 \
-  --select-1"
-
-readonly YTD_ERRORS='
-  Error in the pull function
-  PES packet size mismatch
-  Failed to open segment
-  Unable to open resource
-  Packet corrupt
-'
 
 #* End of Glabal Variables *#
 
