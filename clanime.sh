@@ -35,9 +35,8 @@ readonly USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 readonly \
   EXTRACTORS_CONFIG_DIR=${CLANIME_EXTRACTORS_CONFIG_DIR:-${CONFIG_DIR}}
 
-# Default option for format filter
-readonly \
-  FORMAT_FILTER=${CLANIME_FORMAT:-[format_id*=jaJP][format_id!*=hardsub]}
+# User options for format filter
+readonly -a FORMAT_FILTER=${!CLANIME_FORMAT@}
 
 # Output template options
 
@@ -182,12 +181,41 @@ cleanup() {
   fi
 }
 
+clearLines() {
+  local -a range
+  mapfile -t range < <(seq "$1")
+  # shellcheck disable=SC2034
+  for i in ${range[*]}; do echo -ne '\e[1A\e[K'; done
+}
+
 trimWhiteSpace() {
-  echo -e "$1" | grep '\S' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+  sed 's/^[[:space:]]*//;s/[[:space:]]*$//' <(grep '\S' <(echo -e "$1"))
 }
 
 assertSelection() {
-  trimWhiteSpace "$1" | fzf "${@:2}"
+  fzf "${@:2}" < <(trimWhiteSpace "$1")
+}
+
+makeTEMP() {
+  if [[ ! $1 ]]; then
+    assertError 'unable to create a temporary file!' \
+      '[filename prefix is missing]'
+  elif ! mktemp -q -- "${TMP_DIR}/$1.XXXXXXXXXXXXXXXX"; then
+    assertError 'unable to create a temporary file!'
+  fi
+}
+
+makeFIFO() {
+  local pipe
+  read -r pipe < <(makeTEMP 'fifo') || return 1
+  [[ -d ${TMP_DIR} ]] && rm -f -- "${pipe}" || assertError || return 1
+  mkfifo -m 600 "${pipe}" 2>/dev/null
+
+  if [[ ! -p ${pipe} ]]; then
+    assertError 'unable to create a FIFO (named pipe)!'
+  else
+    echo "${pipe}"
+  fi
 }
 
 assertTryAgain() {
@@ -467,47 +495,59 @@ parsePlaylistIndex() {
 }
 
 playlistFormat() {
+  declare -A formatName
+  declare -A formatFilter
+
+  local formatFromENV
+  for formatFromENV in ${FORMAT_FILTER[*]}; do
+    local presetTemplate=${formatFromENV#CLANIME_FORMAT_}
+    local presetPrefix=${presetTemplate%%_*}
+    [[ ${formatFromENV} == *'_NAME' ]] &&
+      formatName["${presetPrefix}"]=${!formatFromENV}
+    [[ ${formatFromENV} == *'_FILTER' ]] &&
+      formatFilter["${presetPrefix}"]=${!formatFromENV}
+  done
+
+  local formatPresets
+  printf -v formatPresets '%s\n' "${formatName[@]}"
+
+  local pipeFormat
+  read -r pipeFormat < <(makeFIFO) || exit 1
+
+  assertSelection "
+    Select format filter:
+    ${formatPresets}
+    Custome filter
+    No filter (esc)
+  " --header-lines 1 >"${pipeFormat}" &
+
   local filter
-  if ! filter=$(
-    assertSelection '
-      Select format filter
-      Japanese audio (RAW)
-      English audio (RAW)
-      Custome filter
-      No filter
-    ' --header-lines 1
-  ); then
-    assertTryAgain playlistFormat
-  else
+  read -r filter <"${pipeFormat}"
 
-    local format
-    if [[ ${filter} == 'Japanese'* ]]; then
-      format='[format_id*=jaJP][format_id!*=hardsub]'
+  local format
+  if [[ ${filter} == 'Custome'* ]]; then
+    readHeader 'Type your preferred format filter (then press [ENTER])'
+    read -r format < <(readPrompt)
+    clearLines 2
 
-    elif [[ ${filter} == 'English'* ]]; then
-      format='[format_id*=enUS][format_id!*=hardsub]'
+  elif [[ ${filter} && ${filter} != 'No filter'* ]]; then
+    local preset
+    for preset in "${!formatName[@]}"; do
+      [[ ${filter} == "${formatName[${preset}]}" ]] &&
+        format=${formatFilter[${preset}]}
+    done
 
-    elif [[ ${filter} == 'Custome'* ]]; then
-      assertTask 'Awaiting user input for format filter...'
-      readHeader 'Modify format template below (then press [ENTER])'
-      format=$(readPrompt '' "${FORMAT_FILTER}")
-
-    else
-      format='best'
-      assertSuccess 'Format:' "Default to 'best'\n"
-      return
+    if [[ ! ${format} ]]; then
+      assertMissing 'Format filter was not found for this preset!'
+      return 1
     fi
-
-    assertSuccess 'Format:' "${format}"
-  fi
-
-  if [[ ${format} != 'best' ]]; then
-    echo "--format '${format}'" >>"${SERIES_CONFIG}"
-    echo
   else
-    assertSuccess \
-      "No need to add this format to config file. It is used by default!\n"
+    assertSuccess 'Format: no filter'
+    return
   fi
+
+  assertSuccess 'Format filter was saved to series config:'
+  tee -a "${SERIES_CONFIG}" < <(echo "--format '${format}'")
 }
 
 ytdlConfOptions() {
