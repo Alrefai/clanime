@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 
+echo -ne 'Loading... \r'
+
+#* --{ Debug Mode }-- *#
+readonly DEBUG=${CLANIME_DEBUG}
+
+if [[ ${DEBUG} -eq 2 ]]; then
+  PS4='+(${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
+  set -xv
+fi
+
 #* --{ Shell Script Settings }-- *#
 
 set -o pipefail
@@ -138,9 +148,16 @@ assertTip() {
 }
 
 assertError() {
-  echo -n "${RED_UNDERLINE_TXT}Error${RESET}: " >&2
+  local functionsTrace=": ${FUNCNAME[*]:1:${#FUNCNAME[*]}-2}"
 
-  if [[ $# == 0 ]]; then
+  if [[ ${DEBUG} -ge 1 ]]; then
+    echo -n "${RED_UNDERLINE_TXT}Error${RESET}" \
+      "[${BASH_LINENO[0]}${FUNCNAME[2]:+$functionsTrace}]: " >&2
+  else
+    echo -n "${RED_UNDERLINE_TXT}Error${RESET}: " >&2
+  fi
+
+  if [[ $# -eq 0 ]]; then
     echo 'something wrong happened!' >&2
   else
     echo "$*" >&2
