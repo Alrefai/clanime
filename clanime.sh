@@ -238,10 +238,10 @@ assertTryAgain() {
 
 safeFilename() {
   local beSafe='
-    s/^\W+|(?!
+    s/(?!
     (?:COM[0-9]|CON|LPT[0-9]|NUL|PRN|AUX|com[0-9]|con|lpt[0-9]|nul|prn|aux)
-    |[\s\.])
-    [\/:*\"?<>|~\\\\;]{1,254}/_/g
+    |^[\s\.])
+    [\/:*\"?<>|~\\\\]{1,254}/_/g
   '
   perl -pe "${beSafe//[[:space:]]/}"
 }
