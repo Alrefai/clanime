@@ -173,7 +173,25 @@ assertError() {
 
 cleanup() {
   trap - EXIT
+
+  # Delete temporary directory
   [[ -d ${TMP_DIR} ]] && rm -rf -- "${TMP_DIR}"
+
+  # Delete empty files in cache directory
+  [[ -d ${CACHE_DIR} ]] && find -- "${CACHE_DIR}" -empty -delete
+
+  # Delete empty files in config directory
+  [[ -d ${CONFIG_DIR} ]] && find -- "${CONFIG_DIR}" -empty -delete
+
+  # Keep only the last 5 added list backups
+  xargs -0 rm -f -- < <(tr '\n' '\0' < <(tail -n +6 <(grep -v '/$' <(
+    ls -tp "${LIST_JSON_BACKUP_DIR}/${LIST_JSON##*\/}".*.bak 2>/dev/null
+  ))))
+
+  # Keep only the last 20 added playlist index files
+  xargs -0 rm -f -- < <(tr '\n' '\0' < <(tail -n +21 <(grep -v '/$' <(
+    ls -tp "${INDEX_DIR}"/*.txt 2>/dev/null
+  ))))
 
   if [[ $1 ]]; then
     trap - "$1"
