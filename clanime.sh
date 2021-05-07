@@ -25,6 +25,9 @@ readonly LIST_JSON=${CONFIG_DIR}/list.json
 
 #* --{ User Settings with Environment Variables }-- *#
 
+# User fzf default options
+readonly FZF_DEFAULT_OPTS_ENV=${FZF_DEFAULT_OPTS}
+
 # youtube-dl user config path (optional)
 readonly USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
 
@@ -87,6 +90,7 @@ unset -v MAIN
 
 export FZF_DEFAULT_OPTS="
   --bind J:down,K:up,ctrl-a:select-all,ctrl-d:deselect-all,ctrl-t:toggle-all \
+  ${FZF_DEFAULT_OPTS_ENV} \
   --reverse \
   --ansi \
   --no-multi \
