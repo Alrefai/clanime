@@ -12,16 +12,15 @@ fi
 
 #* --{ Shell Script Settings }-- *#
 
-set -o pipefail
 shopt -s extglob
 
-readonly CACHE_HOME=${XDG_CACHE_HOME:-${HOME}/.cache}
-readonly CACHE_DIR=${CACHE_HOME}/clanime
-readonly TMP_DIR_PREFIX=${TMPDIR:-/tmp}/clanime.XXXXXXXXX
+readonly CACHE_DIR=${XDG_CACHE_HOME:-${HOME}/.cache}/clanime
+readonly TMP_DIR_PREFIX=${TMPDIR:-/tmp/}clanime.XXXXXXXXXXXXXXXX
 readonly CONFIG_HOME=${XDG_CONFIG_HOME:-${HOME}/.config}
 readonly CONFIG_DIR=${CONFIG_HOME}/clanime
 readonly INDEX_DIR=${CACHE_DIR}/playlist-index
 readonly LIST_JSON=${CONFIG_DIR}/list.json
+readonly LIST_JSON_BACKUP_DIR=${CACHE_DIR}/list-backup
 
 #* --{ User Settings with Environment Variables }-- *#
 
@@ -29,7 +28,7 @@ readonly LIST_JSON=${CONFIG_DIR}/list.json
 readonly FZF_DEFAULT_OPTS_ENV=${FZF_DEFAULT_OPTS}
 
 # youtube-dl user config path (optional)
-readonly USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/youtube-dl/config}
+readonly USER_CONFIG=${YTDL_USER_CONFIG:-${CONFIG_HOME}/yt-dlp/config}
 
 # User config directory for extractors (optional)
 readonly \
@@ -42,9 +41,17 @@ readonly -a FORMAT_FILTER=${!CLANIME_FORMAT@}
 
 readonly NAME_SUFFIX=${CLANIME_SERIES_NAME_SUFFIX:- - }
 readonly SEASON_PREFIX=${CLANIME_SERIES_SEASON_PREFIX}
-readonly SEASON_SUFFIX=${CLANIME_SERIES_SEASON_SUFFIX:-x}
+readonly SEASON_SUFFIX=${CLANIME_SERIES_SEASON_SUFFIX:-E}
 readonly EPISODE_PREFIX=${CLANIME_SERIES_EPISODE_PREFIX}
-readonly EPISODE_SUFFIX=${CLANIME_SERIES_EPISODE_SUFFIX:-03d - }
+readonly EPISODE_SUFFIX=${CLANIME_SERIES_EPISODE_SUFFIX:-02d - }
+
+# Navigation symbols
+
+readonly MENU_TOP=${CLANIME_MENU_TOP:-'\u276F\u276F'}
+readonly MENU_NAV=${CLANIME_MENU_NAV:-'\u276F'}
+readonly MENU_BACK=${CLANIME_MENU_BACK:-'\u276E'}
+readonly MENU_END=${CLANIME_MENU_END:-'\u2756'}
+readonly MENU_INT=${CLANIME_MENU_INT:-'\u2750'}
 
 #* --{ User Settings with Environment Variables and CLI }-- *#
 #! on/off values for options: on=1 | off=0
@@ -53,10 +60,10 @@ readonly EPISODE_SUFFIX=${CLANIME_SERIES_EPISODE_SUFFIX:-03d - }
 DEFAULT_SEASON_NO=${CLANIME_DEFAULT_SEASON_NO}
 
 # Use youtube-dl provided series name in filename template (default: off)
-YTD_SERIES=${CLANIME_YTD_SERIES_NAME}
+YTD_SERIES=${CLANIME_YTD_SERIES_NAME:-0}
 
 # Create a sub-direcotry with series name (default: on)
-MAKE_SUB_DIR=${CLANIME_MAKE_SUB_DIR}
+MAKE_SUB_DIR=${CLANIME_MAKE_SUB_DIR:-1}
 
 # Optional download directory (default: current working direcotry)
 DOWNLOAD_DIR=${CLANIME_DOWNLOAD_DIR}
@@ -65,15 +72,23 @@ DOWNLOAD_DIR=${CLANIME_DOWNLOAD_DIR}
 PARSE_INDEX_START=${CLANIME_PARSE_INDEX_START:-1}
 
 # Rename subtitles to ISO 639-1 code format (default: on)
-ISO_SUB=${CLANIME_ISO_SUB}
+ISO_SUB=${CLANIME_ISO_SUB:-1}
+
+# Batch rename subtitles in the download directory to ISO 639-1 code format
+# (default: off)
+BATCH_ISO_SUB=${CLANIME_BATCH_ISO_SUB:-0}
 
 # Automatically delete fragmented files (default: on)
-DELETE_FRAG=${CLANIME_DELETE_FRAG}
+DELETE_FRAG=${CLANIME_DELETE_FRAG:-1}
 
 #* End of Settings *#
 
 #* --{ Shell Script Global Variables }-- *#
 
+unset -v JSON
+unset -v ALL_KEYS
+unset -v ALL_KEYS_COUNT
+unset -v ACTIVE_KEYS
 unset -v TMP_DIR
 unset -v AUTONUMBER
 unset -v ARCHIVE_PATH
@@ -85,7 +100,6 @@ unset -v SERIES_URL
 unset -v SERIES_CONFIG
 unset -v SUB_COMMAND
 unset -v ARGS
-unset -v MAIN
 
 export FZF_DEFAULT_OPTS="
   --bind J:down,K:up,ctrl-a:select-all,ctrl-d:deselect-all,ctrl-t:toggle-all \
@@ -116,17 +130,16 @@ readonly SUPPORTED_VIDEO_EXT='mp4|mkv|webm|ogg'
 
 # Font styling and colors
 
-readonly BOLD_TXT=$'\e[1m'
-readonly GREEN_BOLD_TXT=$'\e[1;32m'
-readonly RED_BOLD_TXT=$'\e[1;31m'
-readonly BLUE_TXT=$'\e[34m'
-readonly RED_UNDERLINE_TXT=$'\e[4;31m'
-readonly CYAN_TXT=$'\e[36m'
-readonly CYAN_BOLD_TXT=$'\e[1;36m'
-readonly MAGENTA_BOLD_TXT=$'\e[1;35m'
-readonly MAGENTA_BG_BLACK_TXT=$'\e[45;30m'
-readonly YELLOW_BOLD_TXT=$'\e[1;33m'
-readonly RESET=$'\e[0m'
+readonly BOLD_TXT='\e[1m'
+readonly GREEN_BOLD_TXT='\e[1;32m'
+readonly RED_BOLD_TXT='\e[1;31m'
+readonly BLUE_TXT='\e[34m'
+readonly RED_UNDERLINE_TXT='\e[4;31m'
+readonly CYAN_TXT='\e[36m'
+readonly MAGENTA_BOLD_TXT='\e[1;35m'
+readonly REVERSE_COLORS='\e[7m'
+readonly YELLOW_BOLD_TXT='\e[1;33m'
+readonly RESET='\e[0m'
 
 #* End of Glabal Variables *#
 
@@ -141,7 +154,7 @@ assertSuccess() {
 
 assertMissing() {
   local missingMark="${RED_BOLD_TXT}\u2718${RESET}"
-  echo -e "${missingMark} ${BOLD_TXT}$1${RESET}" "${@:2}"
+  echo -e "${missingMark} ${BOLD_TXT}$1${RESET}" "${@:2}" >&2
 }
 
 assertWarning() {
@@ -149,17 +162,17 @@ assertWarning() {
 }
 
 assertTip() {
-  echo -e "${CYAN_BOLD_TXT}Tip${RESET}${BOLD_TXT}: $*${RESET}"
+  echo -e "${MAGENTA_BOLD_TXT}Tip${RESET}${BOLD_TXT}: $*${RESET}"
 }
 
 assertError() {
   local functionsTrace=": ${FUNCNAME[*]:1:${#FUNCNAME[*]}-2}"
 
   if [[ ${DEBUG} -ge 1 ]]; then
-    echo -n "${RED_UNDERLINE_TXT}Error${RESET}" \
+    echo -ne "${RED_UNDERLINE_TXT}Error${RESET}" \
       "[${BASH_LINENO[0]}${FUNCNAME[2]:+$functionsTrace}]: " >&2
   else
-    echo -n "${RED_UNDERLINE_TXT}Error${RESET}: " >&2
+    echo -ne "${RED_UNDERLINE_TXT}Error${RESET}: " >&2
   fi
 
   if [[ $# -eq 0 ]]; then
@@ -236,20 +249,47 @@ makeFIFO() {
   fi
 }
 
-assertTryAgain() {
-  local tryAgain
-  tryAgain=$(
-    assertSelection '
-      Would you like to try again?
-      Yes
-      Abort
-    ' --header-lines 1
-  )
-
-  if [[ ${tryAgain} == 'Yes' ]]; then
-    "$@"
+navMenu() {
+  until "$@" || if [[ $? -eq 2 ]]; then
+    return 1
   else
-    assertMissing 'Aborted by user'
+    false
+  fi; do assertNav; done
+}
+
+assertNav() {
+  local pipe
+  read -r pipe < <(makeFIFO) || exit 1
+
+  assertSelection "
+    ${MENU_BACK} Back to previous menu
+    Abort (esc)
+  " --disabled >"${pipe}" &
+
+  local nav
+  read -r nav <"${pipe}"
+
+  if [[ ${nav} != *'Back to previous menu' ]]; then
+    assertMissing 'Exiting...'
+    exit 1
+  fi
+}
+
+assertTryAgain() {
+  local pipe
+  read -r pipe < <(makeFIFO) || exit 1
+
+  assertSelection "
+    ${1:-...}
+    Try again
+    Abort (esc)
+  " --disabled --header-lines 1 >"${pipe}" &
+
+  local tryAgain
+  read -r tryAgain <"${pipe}"
+
+  if [[ ${tryAgain} != 'Try again' ]]; then
+    assertMissing 'Exiting...'
     exit 1
   fi
 }
@@ -265,250 +305,285 @@ safeFilename() {
 }
 
 readHeader() {
-  echo "${MAGENTA_BG_BLACK_TXT} $1 ${RESET}"
+  echo -e "${REVERSE_COLORS} $1 ${RESET}"
 }
 
 readPrompt() {
   local prefix=$1
   local suffix=$2
 
+  local prompt
+  IFS= read -r prompt < <(
+    echo -e "${CYAN_TXT}Text input ${MAGENTA_BOLD_TXT}->${RESET} ${prefix}"
+  )
+
   local textInput
-  IFS= read \
-    -erp "${CYAN_TXT}Text input ${MAGENTA_BOLD_TXT}->${RESET} ${prefix}" \
-    -i "${suffix}" textInput
+  IFS= read -erp "${prompt}" -i "${suffix}" textInput
 
   echo "${textInput}"
 }
 
 isPlural() {
-  test "$(wc -l <<<"$1")" -gt 1 && echo s
+  local count
+  read -r count < <(wc -l <<<"$1")
+  [[ ${count} -gt 1 ]] && echo s
 }
 
 isPositiveInteger() {
   [[ $1 == +([0-9]) && (($1 -gt 0)) ]] && echo "$1"
 }
 
-selectModifiers() {
-  local maxItems=$1
-  local headerItems=$2
-  local modifiers=$3
-
-  assertSelection "
-    Select ${headerItems}
-    ${modifiers}
-  " -m "${maxItems}" --header-lines 1
-}
-
 confirmModifiers() {
   local indexFile=$1
+  local maxItems=$2
+  local headerItems=$3
+  local -a modifiers=("${@:4}")
 
-  local playlistModifier
-  until [[ ${playlistModifier} ]]; do
-    if ! playlistModifier=$(selectModifiers "${@:2}"); then
-      assertTryAgain
-    elif grep -q '^--playlist-items' <<<"${playlistModifier}" 2>/dev/null &&
-      grep -qE '^--playlist-(start|end)' <<<"${playlistModifier}" \
-        2>/dev/null; then
-      assertMissing 'Do not use --playlist-item with --playlist-(start|end)'
-      unset playlistModifier
-      assertTryAgain
-    fi
-  done
+  local pipeSelectModifiers
+  read -r pipeSelectModifiers < <(makeFIFO) || exit 1
 
-  local modifiersCount
-  modifiersCount=$(wc -l <<<"${playlistModifier}")
+  assertSelection "
+    ${MENU_NAV} Select ${headerItems}:
+    ${modifiers[*]}
+  " -m "${maxItems}" +1 --header-lines 1 >"${pipeSelectModifiers}" &
+
+  local -a playlistModifier
+  mapfile playlistModifier <"${pipeSelectModifiers}"
+  local modifiersCount=${#playlistModifier[@]}
+  [[ ${modifiersCount} -gt 0 ]] || return 2
+
+  if grep -qF 'playlist-items' <<<"${playlistModifier[@]}" 2>/dev/null &&
+    grep -qE 'playlist-(start|end)' <<<"${playlistModifier[@]}" \
+      2>/dev/null; then
+    assertMissing 'Use either --playlist-items or --playlist-(start|end)'
+    return 1
+  fi
+
+  local pipeConfirmSelection
+  read -r pipeConfirmSelection < <(makeFIFO) || exit 1
+  local maybePlural
+  read -r maybePlural < <([[ ${modifiersCount} -gt 1 ]] && echo s)
+
+  assertSelection "
+    ${MENU_END} Playlist modifier${maybePlural}:
+    ${playlistModifier[*]}
+    Confirm
+    Cancel (esc)
+  " --header-lines $((modifiersCount + 1)) >"${pipeConfirmSelection}" &
 
   local confirmSelection
-  if ! confirmSelection=$(
-    assertSelection "
-      Confirm playlist modifiers?
-      $(assertSuccess "Playlist modifiers:\n${playlistModifier}")
-      Yes
-      No, reselect index numbers
-      Skip
-    " --header-lines $((modifiersCount + 2))
-  ); then
-    assertTryAgain confirmModifiers "$@"
+  read -r confirmSelection <"${pipeConfirmSelection}" || return 1
 
+  if [[ ${confirmSelection} == 'Confirm'* ]]; then
+    assertSuccess "Playlist modifier${maybePlural}:"
+    tee -a "${SERIES_CONFIG}" < <(printf '%s' "${playlistModifier[@]}")
   else
-    if [[ ${confirmSelection} == 'Yes'* ]]; then
-      assertSuccess 'Playlist modifiers:' "\n${playlistModifier}\n"
-      echo "${playlistModifier}" >>"${SERIES_CONFIG}"
-    elif [[ ${confirmSelection} == 'No'* ]]; then
-      playlistSelection "${indexFile}"
-    else
-      assertMissing "Skipped by user\n"
-    fi
+    return 1
   fi
 }
 
 playlistSelection() {
   local indexFile=$1
 
-  if [[ ! -s ${indexFile} ]]; then
-    assertMissing "No items in playlist index file\n"
-    return
-  fi
+  while true; do
+    local pipePlaylist
+    read -r pipePlaylist < <(makeFIFO) || exit 1
+    local fzfHeader
+    read -r fzfHeader < <(
+      echo -e "${MENU_TOP} Select one or two items:"
+    )
 
-  local fzfHeader='Select one or two items from the list'
-  local playlistItems
-  if ! playlistItems=$(
-    fzf --exact --no-sort -m 2 --header "${fzfHeader}" <"${indexFile}" |
-      awk '{print $1}'
-  ); then
+    fzf --exact --no-sort +1 -m 2 --header "${fzfHeader}" <"${indexFile}" \
+      >"${pipePlaylist}" &
+
+    local -a playlistItems
+    mapfile -t playlistItems < <(awk '{printf "%d\n", $1}' "${pipePlaylist}")
+    [[ ${#playlistItems[@]} -gt 0 ]] && break
+
+    local pipeTryAgain
+    read -r pipeTryAgain < <(makeFIFO) || exit 1
+
+    assertSelection '
+      Continue without modifiers
+      Try again
+      Abort (esc)
+    ' --disabled >"${pipeTryAgain}" &
 
     local tryAgain
-    tryAgain=$(
-      assertSelection '
-        Would you like to try again?
-        Yes
-        No, continue without modifiers
-        Abort
-      ' --header-lines 1
-    )
+    read -r tryAgain <"${pipeTryAgain}"
 
-    if [[ ${tryAgain} == 'Yes' ]]; then
-      playlistSelection "$@"
-    elif [[ ${tryAgain} == 'No'* ]]; then
-      assertSuccess "Continue without modifiers\n"
+    if [[ ${tryAgain} == 'Continue'* ]]; then
+      return
+    elif [[ ${tryAgain} == 'Try again' ]]; then
+      continue
     else
-      assertMissing 'Aborted by user'
+      assertMissing 'Exiting...'
       exit 1
     fi
+  done
 
-  else
-    local playlistModifiers
-    playlistModifiers=$(
-      awk '
-        END{print "--playlist-end "$1}
-        NR==1{print "--playlist-start "$1}
-      ' <<<"${playlistItems}"
+  local pipePlaylistModifiers
+  read -r pipePlaylistModifiers < <(makeFIFO) || exit 1
+
+  awk '
+    END{print "--playlist-end "$1}
+    NR==1{print "--playlist-start "$1}
+  ' <(printf '%s\n' "${playlistItems[@]}") >"${pipePlaylistModifiers}" &
+
+  local -a playlistModifiers
+  mapfile playlistModifiers <"${pipePlaylistModifiers}"
+
+  local -a newPlaylistModifiers
+  if [[ ${#playlistItems[@]} -eq 1 ]]; then
+    newPlaylistModifiers=(
+      "${playlistModifiers[@]}" "--playlist-items ${playlistItems[0]}"
     )
-
-    if [[ $(awk '{print NR}' <<<"${playlistItems}") == 1 ]]; then
-      confirmModifiers "${indexFile}" 1 'a modifier' "${playlistModifiers}"
-    else
-      local range
-      range=$(paste -sd '-' - <<<"${playlistItems}")
-      playlistModifiers="${playlistModifiers}\n--playlist-items ${range}"
-      confirmModifiers "${indexFile}" 2 'one or two modifiers' \
-        "${playlistModifiers}"
-    fi
+    navMenu confirmModifiers "${indexFile}" 1 'a modifier' \
+      "${newPlaylistModifiers[@]}" || return 1
+  else
+    local range
+    read -r range < <(
+      paste -sd '-' <(printf '%s\n' "${playlistItems[@]}")
+    )
+    newPlaylistModifiers=("${playlistModifiers[@]}" "--playlist-items ${range}")
+    navMenu confirmModifiers "${indexFile}" 2 'one or two modifiers' \
+      "${newPlaylistModifiers[@]}" || return 1
   fi
 }
 
 outputTemplate() {
   local templateSelection
-  if ! templateSelection=${DEFAULT_SEASON_NO:-$(
+  if [[ ${DEFAULT_SEASON_NO} ]]; then
+    templateSelection=${DEFAULT_SEASON_NO}
+  else
+
+    local pipeTemplateSelection
+    read -r pipeTemplateSelection < <(makeFIFO) || exit 1
+
     assertSelection '
-      Select output template season number preset
+      Select season number preset for output template:
       Single season
       Multi seasons
       Custom season
-      Skip
-    ' --header-lines 1
-  )}; then
-    assertTryAgain outputTemplate
-  else
+    ' --header-lines 1 >"${pipeTemplateSelection}" &
 
-    local seriesName
-    if [[ ${YTD_SERIES} != 1 ]]; then
-      seriesName="${SERIES}"
-    else
-      seriesName='%(series)s'
-    fi
-
-    local seriesSeasonNumber
-    if [[ ${templateSelection} == [Ss]ingle* ]]; then
-      seriesSeasonNumber='1'
-    elif [[ ${templateSelection} == [Mm]ulti* ]]; then
-      seriesSeasonNumber='%(season_number)1d'
-    elif [[ ${templateSelection} != 'Skip' ]]; then
-      assertTask 'Awaiting user input for custome season number...'
-      readHeader 'Modify season number below (then press [ENTER])'
-      seriesSeasonNumber=$(readPrompt '' '0')
-    else
-      assertMissing "Skipped output template\n"
-      return
-    fi
-
-    local templateBlocks="
-      ${seriesName}${NAME_SUFFIX}
-      ${SEASON_PREFIX}${seriesSeasonNumber}${SEASON_SUFFIX}
-      ${EPISODE_PREFIX}%(episode_number)${EPISODE_SUFFIX}
-      %(episode)s.%(ext)s
-    "
-
-    local template
-    template=$(
-      echo "${templateBlocks}" | sed 's/^[[:space:]]*//' | tr -d '\n'
-    )
-
-    echo "-o \"${template}\"" >>"${SERIES_CONFIG}"
-    assertSuccess 'Output template:' "${template}\n"
+    read -r templateSelection <"${pipeTemplateSelection}" || return 1
   fi
+
+  local seriesSeasonNumber
+  if [[ ${templateSelection} == [Ss]ingle* ]]; then
+    seriesSeasonNumber=1
+  elif [[ ${templateSelection} == [Mm]ulti* ]]; then
+    seriesSeasonNumber='%(season_number)1d'
+  elif [[ ${templateSelection} == [Cc]ustom* ]]; then
+    readHeader 'Modify season number below (then press [ENTER])'
+    read -r seriesSeasonNumber < <(readPrompt '' '0')
+    clearLines 2
+  fi
+
+  local seriesName
+  if [[ ${YTD_SERIES} -ne 1 ]]; then
+    seriesName="${SERIES}"
+  else
+    seriesName='%(series)s'
+  fi
+
+  local templateBlocks="
+    ${seriesName}${NAME_SUFFIX}
+    ${SEASON_PREFIX}${seriesSeasonNumber}${SEASON_SUFFIX}
+    ${EPISODE_PREFIX}%(episode_number)${EPISODE_SUFFIX}
+    %(episode)s.%(ext)s
+  "
+
+  local template
+  # shellcheck disable=SC2001
+  read -r template < <(
+    tr -d '\n' < <(sed 's/^[[:space:]]*//' <<<"${templateBlocks}")
+  )
+
+  assertSuccess "Output template was saved to series config:"
+  tee -a "${SERIES_CONFIG}" < <(echo "-o \"${template}\"")
 }
 
 parsePlaylistIndex() {
   local indexFile=$1
 
+  echo
   assertTask 'Parsing series playlist with youtube-dl...'
   assertWarning \
     'youtube-dl may take several minutes to parse long playlists'
 
+  local concatConf
+  read -r concatConf < <(makeTEMP 'config') || exit 1
+  cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" "${SERIES_CONFIG}" 2>/dev/null \
+    >"${concatConf}"
+  [[ ${FORMAT} ]] && echo "--format ${FORMAT}" >>"${concatConf}"
+  # local -a concatConf
+  # mapfile -t concatConf < <(
+  #   cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" "${SERIES_CONFIG}" 2>/dev/null
+  # )
+  #
   local format
-  format=$(
-    cat "${EXTRACTOR_CONFIG}" "${SERIES_CONFIG}" 2>/dev/null |
-      grep '^--format ' |
-      tail -n 1 |
-      awk '{print $2}' |
-      sed -E "s/'|\"//g"
+  read -r format < <(
+    sed -E "s/'|\"//g" <(awk '{print $2}' <(tail -n 1 < <(
+      grep '^\s*--format ' "${concatConf}"
+      # grep '^\s*--format ' <(printf '%s\n' "${concatConf[@]}")
+    )))
   )
 
   if [[ ${format} ]]; then
     assertSuccess 'Format:' "${format}"
   else
-    assertSuccess 'Format:' "Default to 'best'"
+    assertSuccess 'Format: no filter'
   fi
 
   assertSuccess 'Cache file:' "${indexFile/#$HOME/\~}"
-  assertSuccess 'Data output:' 'INDEX | SEASON_NUMBER | TITLE'
+  assertSuccess 'Data output:' 'INDEX | SEASON NUMBER | TITLE'
 
-  if youtube-dl "${SERIES_URL}" \
-    --config-location <(
-      cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" 2>/dev/null
-    ) \
-    --dump-json \
-    --match-title '.*' \
-    --ignore-errors \
-    --playlist-start "${PARSE_INDEX_START}" \
-    --format "${format:-best}" |
-    jq --unbuffered -cr \
-      '[.playlist_index,.season_number,.title] | join(" | ")' |
-    tee "${indexFile}" || [[ $? == 1 ]] && [[ -s ${indexFile} ]]; then
+  local pipeIndex
+  read -r pipeIndex < <(makeFIFO) || exit 1
 
-    assertSuccess "Parsing completed\n"
-  else
-    assertError 'failed to parse playlist'
+  jq -cr --unbuffered '[.playlist_index,.season_number,.title] | join("|")' < <(
 
-    local tryAgainOrSkip
-    tryAgainOrSkip=$(
-      assertSelection '
-        Try again
-        Skip
-        Abort
-      '
-    )
+    # --config-location <(printf '%s\n' "${concatConf[@]}") \
+    yt-dlp "${SERIES_URL}" \
+      --config-location "${concatConf}" \
+      --dump-json \
+      --no-match-filter \
+      --ignore-errors \
+      --playlist-start "${PARSE_INDEX_START}"
 
-    if [[ ${tryAgainOrSkip} == 'Try'* ]]; then
-      echo
-      parsePlaylistIndex "$@"
-    elif [[ ${tryAgainOrSkip} == 'Abort' ]]; then
-      assertMissing 'Aborted by user'
-      exit 1
-    else
-      assertMissing "Skipped by user\n"
-    fi
+  ) >"${pipeIndex}" &
+
+  tee "${indexFile}" < <(
+    awk -F '|' '{printf "%4d | S%-2d| %s\n", $1,$2,$3; fflush()}' "${pipeIndex}"
+  )
+
+  if [[ -s ${indexFile} ]]; then
+    assertSuccess 'Done with playlist parsing'
+    echo
+    assertTask 'Resuming previous activity...'
+    return
+  fi
+
+  assertMissing 'Failed to parse playlist'
+  local pipeTryAgain
+  read -r pipeTryAgain < <(makeFIFO) || exit 1
+
+  assertSelection '
+    Try again
+    Skip (esc)
+    Abort
+  ' --disabled >"${pipeTryAgain}" &
+
+  local tryAgainOrSkip
+  read -r tryAgainOrSkip <"${pipeTryAgain}" || return 0
+
+  if [[ ${tryAgainOrSkip} == 'Try'* ]]; then
+    return 1
+  elif [[ ${tryAgainOrSkip} == 'Abort' ]]; then
+    assertMissing 'Exiting...'
+    exit 1
   fi
 }
 
@@ -568,115 +643,117 @@ playlistFormat() {
   tee -a "${SERIES_CONFIG}" < <(echo "--format '${format}'")
 }
 
-ytdlConfOptions() {
-  assertSelection '
-    Select one or more youtube-dl options
-    --format FORMAT
-    --playlist-(start|end) NUMBER || --playlist-items ITEM_SPEC
-    --output TEMPLATE
-  ' --header-lines 1 -m || assertTryAgain ytdlConfOptions
-}
-
 customizeConfigFile() {
-  assertTask 'Customizing config file...'
+  local pipeUsePresets
+  read -r pipeUsePresets < <(makeFIFO) || exit 1
 
-  local useConfigWizard
-  useConfigWizard=$(
-    assertSelection '
-      Use Config Wizard
-      Add youtube-dl options manually
-    '
-  )
+  assertSelection "
+    ${MENU_TOP} Customize series config...
+    with presets
+    manually (esc)
+  " --disabled --header-lines 1 >"${pipeUsePresets}" &
 
-  if [[ ${useConfigWizard} != *'Wizard' ]]; then
+  local useConfigPresets
+  read -r useConfigPresets <"${pipeUsePresets}"
+
+  if [[ ${useConfigPresets} != *'presets' ]]; then
     ${EDITOR:-vi} "${SERIES_CONFIG}"
 
     if [[ -s ${SERIES_CONFIG} ]]; then
-      assertSuccess "Customized youtube-dl options manually\n"
+      assertSuccess 'Series config was customized manually'
     else
-      assertMissing "Config file is empty!\n"
+      assertMissing "Config file is empty; it will be discarded!"
     fi
 
     return
   fi
 
-  local configOptions
-  configOptions=$(ytdlConfOptions)
+  local pipeConfigOptions
+  read -r pipeConfigOptions < <(makeFIFO) || exit 1
 
-  if grep -q '^--format' <<<"${configOptions}" 2>/dev/null; then
-    assertTask 'Awaiting user selection for format filter...'
-    playlistFormat
-  fi
+  assertSelection "
+    ${MENU_END} Select one or more options:
+    --format FORMAT
+    --playlist-(start|end) NUMBER; --playlist-items ITEM_SPEC
+    --output TEMPLATE
+  " --disabled --header-lines 1 -m >"${pipeConfigOptions}" &
+
+  local -a configOptions
+  mapfile -t configOptions <"${pipeConfigOptions}"
+  [[ ${#configOptions[@]} -gt 0 ]] || return 1
+
+  grep -qF 'format' <<<"${configOptions[@]}" 2>/dev/null && playlistFormat
 
   createIndexFile() {
-    [[ -d ${INDEX_DIR} ]] ||
-      if ! mkdir -p "${INDEX_DIR}" 2>/dev/null; then
-        assertError 'could not create index directory in path:' "${INDEX_DIR}"
-        exit 1
-      fi
-
-    echo "${INDEX_DIR}/$(date '+%Y-%m-%d') - ${SERIES}.txt"
-  }
-
-  selectIndexFile() {
-    if ! find "${INDEX_DIR}"/*"${SERIES}"* |
-      fzf --header 'Select a playlist index file' \
-        --tac \
-        --with-nth 7.. \
-        --delimiter '/' \
-        --preview 'cat {} 2>/dev/null | head -200'; then
-      assertMissing 'No playlist index file was selected'
-      assertTryAgain selectIndexFile
+    if ! mkdir -p "${INDEX_DIR}" 2>/dev/null; then
+      assertError 'unable to create index directory in path:' "${INDEX_DIR}"
+      exit 1
     fi
+
+    # Keep only the last 2 added playlist index files of the series
+    xargs -0 rm -f -- < <(tr '\n' '\0' < <(tail -n +3 <(grep -v '/$' <(
+      ls -tp "${INDEX_DIR}"/*"${SERIES}".txt 2>/dev/null
+    ))))
+
+    local indexFileDate
+    read -r indexFileDate < <(date '+%Y-%m-%d')
+    echo "${INDEX_DIR}/${indexFileDate} - ${SERIES}.txt"
   }
 
-  if grep -q '^--playlist' <<<"${configOptions}" 2>/dev/null; then
+  if grep -qF 'playlist' <<<"${configOptions[@]}" 2>/dev/null; then
     local indexFile
-    assertTask 'Finding local playlist index...'
 
     if compgen -G "${INDEX_DIR}/*${SERIES}*" >/dev/null; then
-      assertSuccess "Found one or more playlist index locally\n"
+      local pipeIndexFilePrompt
+      read -r pipeIndexFilePrompt < <(makeFIFO) || exit 1
+
+      assertSelection '
+        Use existing playlist index (esc)
+        Create a new playlist index with youtube-dl
+      ' --disabled >"${pipeIndexFilePrompt}" &
 
       local playlistIndexPrompt
-      playlistIndexPrompt=$(
-        assertSelection '
-          Do you want to use existing playlist index?
-          Yes
-          No, create a new playlist index with youtube-dl
-        ' --header-lines 1
-      )
+      read -r playlistIndexPrompt <"${pipeIndexFilePrompt}"
 
-      if [[ ${playlistIndexPrompt} == 'Yes' ]]; then
-        assertTask 'Awaiting user selection for playlist index file...'
-        indexFile=$(selectIndexFile)
-        assertSuccess 'Playlist index file:' "${indexFile/#$HOME/\~}\n"
+      if [[ ${playlistIndexPrompt} == 'Create'* ]]; then
+        read -r indexFile < <(createIndexFile) || return 1
+        until parsePlaylistIndex "${indexFile}"; do continue; done
       else
-        indexFile=$(createIndexFile)
-        parsePlaylistIndex "${indexFile}"
+        local pipeIndexFile
+        read -r pipeIndexFile < <(makeFIFO) || exit 1
+        local matchSlashes
+        read -r matchSlashes < <(echo "${INDEX_DIR//[!\/]/}")
+
+        # shellcheck disable=SC2016
+        fzf < <(find -- "${INDEX_DIR}"/*"${SERIES}"*) \
+          --header 'Select a playlist index file:' \
+          --tac \
+          --delimiter '/' \
+          --with-nth $((${#matchSlashes} + 2)).. \
+          --preview 'head -n ${FZF_PREVIEW_LINES} <{} 2>/dev/null' \
+          >"${pipeIndexFile}" &
+
+        read -r indexFile <"${pipeIndexFile}" || return 1
       fi
 
     else
-      assertMissing "No playlist index found locally\n"
-      indexFile=$(createIndexFile)
-      parsePlaylistIndex "${indexFile}"
+      read -r indexFile < <(createIndexFile)
+      until parsePlaylistIndex "${indexFile}"; do continue; done
     fi
 
-    assertTask 'Awaiting user selection for playlist modifiers...'
-    playlistSelection "${indexFile}"
+    if [[ -s ${indexFile} ]]; then
+      navMenu playlistSelection "${indexFile}" || return 1
+    fi
   fi
 
-  if grep -q '^--output' <<<"${configOptions}" 2>/dev/null; then
-    assertTask 'Awaiting user selection for output template...'
-    outputTemplate
-  fi
+  grep -qF 'output' <<<"${configOptions[@]}" 2>/dev/null && outputTemplate
 
   [[ -s ${SERIES_CONFIG} ]] && ${EDITOR:-vi} "${SERIES_CONFIG}"
 
-  assertTask 'Saving config file...'
   if [[ -s ${SERIES_CONFIG} ]]; then
-    assertSuccess 'Config file:' "${SERIES_CONFIG/#$HOME/\~}\n"
+    assertSuccess 'Config file was saved:' "${SERIES_CONFIG/#$HOME/\~}"
   else
-    assertMissing "Config file is empty!\n"
+    assertMissing "Config file is empty; it will be discarded!"
   fi
 }
 
@@ -685,231 +762,356 @@ getConfigFilename() {
     'Append text to series title or leave it as is (then press [ENTER])'
 
   local textInput
-  textInput=$(readPrompt "${SERIES}")
+  IFS= read -r textInput < <(readPrompt "${SERIES}")
+  clearLines 2
 
   local confFilename
-  confFilename=$(safeFilename <<<"${SERIES}${textInput}").conf
+  read -r confFilename < <(safeFilename <<<"${SERIES}${textInput}.conf")
 
-  while [[ -f ${CONFIG_DIR}/${confFilename} ]]; do
-    assertWarning 'Filename already exists'
+  if [[ -f ${CONFIG_DIR}/${confFilename} ]]; then
+    local pipeConflictPrompt
+    read -r pipeConflictPrompt < <(makeFIFO) || exit 1
+    local fileExistWarn
+    read -r fileExistWarn < <(assertWarning 'Filename already exists')
+
+    assertSelection "
+      ${fileExistWarn}
+      Try a different filename
+      Use existing config file
+      Abort (esc)
+    " --disabled --header-lines 1 >"${pipeConflictPrompt}" &
 
     local conflictPrompt
-    conflictPrompt=$(
-      assertSelection '
-        Would you like to try a different filename?
-        Yes
-        No, use existing config file
-        Abort
-      ' --header-lines 1
-    )
+    read -r conflictPrompt <"${pipeConflictPrompt}"
 
-    if [[ ${conflictPrompt} == 'Yes' ]]; then
-      textInput=$(readPrompt "${SERIES}" "${textInput}")
-      confFilename=$(safeFilename <<<"${SERIES}${textInput}").conf
-    elif [[ ${conflictPrompt} == 'No'* ]]; then
-      break
+    if [[ ${conflictPrompt} == 'Try'* ]]; then
+      return 1
+    elif [[ ${conflictPrompt} == 'Use'* ]]; then
+      echo -n
     else
-      assertMissing 'Aborted by user'
+      assertMissing 'Exiting...'
       exit 1
     fi
+  fi
 
-  done
+  local pipeConfirmFilename
+  read -r pipeConfirmFilename < <(makeFIFO) || exit 1
+
+  assertSelection "
+    ${MENU_END} ${confFilename}
+    Confirm config filename
+    Rename it (esc)
+  " --disabled --header-lines 1 >"${pipeConfirmFilename}" &
 
   local confirmConfFile
-  confirmConfFile=$(
-    assertSelection "
-      Confirm config filename?
-      $(assertSuccess "Config filename: '${confFilename}'")
-      Yes, continue
-      No, rename it
-    " --header-lines 2
-  )
+  read -r confirmConfFile <"${pipeConfirmFilename}"
 
-  if [[ ${confirmConfFile} == 'Yes'* ]]; then
-    SERIES_CONFIG="${CONFIG_DIR}/${confFilename}"
-    assertSuccess 'Config filename:' "${confFilename}\n"
+  if [[ ${confirmConfFile} == 'Confirm'* ]]; then
+    readonly SERIES_CONFIG="${CONFIG_DIR}/${confFilename}"
+    assertSuccess 'Series config filename:' "${confFilename}"
   else
-    getConfigFilename
-  fi
-}
-
-createConfigFile() {
-  assertTask 'Awaiting user input for config filename...'
-  getConfigFilename
-  customizeConfigFile
-}
-
-selectConfigFile() {
-  if ! SERIES_CONFIG=$(
-    find "${CONFIG_DIR}/${SERIES}"* |
-      fzf --header 'Select a config file' \
-        --with-nth 6.. \
-        --delimiter '/' \
-        --preview 'cat {} 2>/dev/null | head -200'
-  ); then
-    assertMissing 'No config file was selected'
-    assertTryAgain selectConfigFile
-  else
-
-    local confFilename
-    confFilename=$(basename "${SERIES_CONFIG}")
-
-    local isCustom
-    isCustom=$(
-      assertSelection "
-        Do you want to customize this config file?
-        $(assertSuccess "Config file: '${confFilename}'")
-        No
-        Yes
-      " --header-lines 2 \
-        --preview "cat \"${SERIES_CONFIG}\" 2>/dev/null | head -200"
-    )
-
-    if [[ ${isCustom} == 'Yes' ]]; then
-      assertSuccess 'Config file:' "${SERIES_CONFIG/#$HOME/\~}\n"
-      customizeConfigFile
-    else
-      if [[ -s ${SERIES_CONFIG} ]]; then
-        assertSuccess 'Config file:' "${SERIES_CONFIG/#$HOME/\~}\n"
-      else
-        assertMissing "Config file is empty!\n"
-      fi
-    fi
-  fi
-}
-
-preSelectedSeries() {
-  assertTask 'Parsing series title with youtube-dl...'
-
-  local json
-  json=$(
-    youtube-dl "${SERIES_URL}" \
-      --config-location <(
-        cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" 2>/dev/null
-      ) \
-      --dump-json \
-      --max-download 1 \
-      --all-formats \
-      --match-title '.*' \
-      --no-warnings \
-      --ignore-errors
-  )
-
-  if [[ ${json} ]]; then
-    SERIES=$(jq -cr '.series' <<<"${json}" | safeFilename)
-    EXTRACTOR=$(jq -cr '.extractor' <<<"${json}")
-  fi
-
-  if [[ ${SERIES} ]]; then
-    if [[ ! ${EXTRACTOR} ]]; then
-      assertError 'could not parse extractor name!'
-      exit 1
-    fi
-    assertSuccess 'Exractor:' "${EXTRACTOR}"
-    assertSuccess 'Series:' "${SERIES}"
-    return
-  fi
-
-  assertError 'could not parse series title!'
-  exit 1
-}
-
-addToWatchList() {
-  [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
-
-  local json
-  json=$(cat "${LIST_JSON}")
-
-  local titles
-  titles=$(jq -r '.[][]?.title' <<<"${json}")
-
-  if ! grep -qxF "${SERIES}" <<<"${titles}" 2>/dev/null; then
-    local confirmAddToWatchList
-    confirmAddToWatchList=$(
-      assertSelection "
-        Do you want to add this series to 'Watching' list?
-        Yes
-        No
-      " --header-lines 1
-    )
-
-    if [[ ${confirmAddToWatchList} == 'Yes' ]]; then
-      jq \
-        --arg url "${SERIES_URL}" \
-        --arg title "${SERIES}" \
-        --arg extractor "${EXTRACTOR}" \
-        '.watching += [{ $url, $title, $extractor }]' <<<"${json}" \
-        >"${LIST_JSON}"
-
-      assertSuccess "Series added to 'Watching' list"
-      assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}\n"
-    else
-      echo
-      return
-    fi
-
-  else
-    local list
-    list=$(
-      jq -cr --arg title "${SERIES}" \
-        'keys[] as $list | select(.[$list][].title==$title) | $list' \
-        <<<"${json}"
-    )
-
-    assertSuccess "Series found in '${list^}' list"
-    assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}\n"
-  fi
-}
-
-findConfig() {
-  assertTask 'Finding custom config file for this series...'
-  if compgen -G "${CONFIG_DIR}/${SERIES}*" >/dev/null; then
-    assertSuccess "Found one or more youtube-dl config files for this series"
-    return 0
-  else
-    assertMissing "No config file found\n"
     return 1
   fi
 }
 
-processConfig() {
-  if findConfig; then
-    local useExistingConf
-    useExistingConf=$(
-      assertSelection '
-        Select a config file
-        Create a new config file
-        Skip
-      '
-    )
+createConfigFile() {
+  until getConfigFilename; do continue; done
+  until customizeConfigFile; do assertNav; done
+}
 
-    if [[ ${useExistingConf} == 'Select'* ]]; then
-      echo
-      assertTask 'Awaiting user selection for config file...'
-      selectConfigFile
-    elif [[ ${useExistingConf} == 'Create'* ]]; then
-      echo
-      createConfigFile
-    else
-      assertMissing "No config file selected for this series!\n"
-    fi
+findConfig() {
+  local series=$1
+  local header=$2
 
+  [[ ${header} ]] ||
+    read -r header < <(echo -e "${MENU_END} Select a config file:")
+  local matchSlashes
+  read -r matchSlashes < <(echo "${CONFIG_DIR//[!\/]/}")
+  # shellcheck disable=SC2016
+  fzf < <(find -- "${CONFIG_DIR}/${series}"*) \
+    --header "${header}" \
+    --keep-right \
+    --no-select-1 \
+    --delimiter '/' \
+    --with-nth $((${#matchSlashes} + 2)).. \
+    --preview 'head -n ${FZF_PREVIEW_LINES} <{} 2>/dev/null'
+}
+
+selectConfigFile() {
+  local escape=$1
+
+  local pipeSeriesConfig
+  read -r pipeSeriesConfig < <(makeFIFO) || exit 1
+  findConfig "${SERIES}" >"${pipeSeriesConfig}" &
+
+  read -r SERIES_CONFIG <"${pipeSeriesConfig}" || return 1
+  readonly SERIES_CONFIG
+
+  local pipeIsCustom
+  read -r pipeIsCustom < <(makeFIFO) || exit 1
+
+  [[ ! ${escape} ]] && local skipOption='Skip customization (esc)'
+  # shellcheck disable=SC2016
+  assertSelection "
+    ${SERIES_CONFIG##*\/}
+    ${skipOption}
+    Customize this config file
+    ${escape:+${escape} (esc)}
+  " --header-lines 1 +1 --disabled --preview '
+      head -n ${FZF_PREVIEW_LINES} <"'"${SERIES_CONFIG}"'" 2>/dev/null
+    ' >"${pipeIsCustom}" &
+
+  local isCustom
+  read -r isCustom <"${pipeIsCustom}"
+
+  if [[ ${isCustom} == 'Customize'* ]]; then
+    assertSuccess 'Customize config file:' "${SERIES_CONFIG/#$HOME/\~}"
+    until customizeConfigFile; do assertNav; done
   else
-    local createNewConf
-    createNewConf=$(
-      assertSelection '
-        Do you want to create a custom youtube-dl config file for this series?
-        Yes
-        No
-      ' --header-lines 1
-    )
-    if [[ ${createNewConf} == 'Yes' ]]; then
-      createConfigFile
+    if [[ -s ${SERIES_CONFIG} ]]; then
+      assertSuccess 'Series config:' "${SERIES_CONFIG/#$HOME/\~}"
+    else
+      assertMissing "Config file is empty; it will be discarded!"
     fi
   fi
 }
 
+handleYtdErrors() {
+  local file=$1
+  local task=${2:-parse}
+
+  local error403='HTTP Error 403: Forbidden'
+  local error404='HTTP Error 404: Not Found'
+  local errorURL='Unsupported URL'
+  local errorDRM='DRM protected'
+  local formatNA='Requested format is not available'
+
+  local lastLine
+  read -r lastLine < <(tail -n 1 "${file}")
+
+  # if grep -qF "${error403}" "${file}" 2>/dev/null; then
+  if grep -qF "${error403}" <<<"${lastLine}" 2>/dev/null; then
+    assertMissing "Unable to ${task} series with youtube-dl! [${error403}]"
+    local header
+    read -r header < <(
+      assertTip 'provide your auth credentials with cookies or other methods'
+    )
+    assertTryAgain "${header}"
+    unset -v header
+    clearLines 1
+    return 1
+
+  # elif grep -qF "${error404}" "${file}" 2>/dev/null; then
+  elif grep -qF "${error404}" <<<"${lastLine}" 2>/dev/null; then
+    assertMissing "Unable to ${task} series with youtube-dl! [${error404}]"
+    exit 1
+
+  # elif grep -qF "${errorDRM}" "${file}" 2>/dev/null; then
+  elif grep -qF "${errorDRM}" <<<"${lastLine}" 2>/dev/null; then
+    assertMissing "Unable to ${task} series with youtube-dl! [${errorDRM}]"
+    exit 1
+
+  # elif grep -qF "${errorURL}" "${file}" 2>/dev/null; then
+  elif grep -qF "${errorURL}" <<<"${lastLine}" 2>/dev/null; then
+    assertMissing "Unable to ${task} series with youtube-dl! [${errorURL}]"
+    exit 1
+
+  # elif grep -qF "${formatNA}" "${file}" 2>/dev/null; then
+  elif grep -qF "${formatNA}" <<<"${lastLine}" 2>/dev/null; then
+    return
+
+  # elif grep -qF 'ERROR' "${file}" 2>/dev/null; then
+  elif grep -qF 'ERROR' <<<"${lastLine}" 2>/dev/null; then
+    if [[ ${task} == 'parse' ]]; then
+      assertError 'unhandled youtube-dl error:'
+      grep -F 'ERROR' <<<"${lastLine}" >&2
+    else
+      assertError 'unhandled youtube-dl error'
+    fi
+    exit 1
+  fi
+}
+
+preSelectedSeries() {
+  local json
+  local config
+  read -r json < <(makeTEMP 'json') || exit 1
+  read -r config < <(makeTEMP 'json') || exit 1
+  cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" 2>/dev/null >"${config}"
+
+  # --config-location <(
+  #   cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" 2>/dev/null
+  # ) \
+  parseSeriesWithYtd() {
+    yt-dlp "${SERIES_URL}" \
+      --config-location "${config}" \
+      --dump-json \
+      --max-download 1 \
+      --all-formats \
+      --no-match-filter \
+      --abort-on-error \
+      --compat-options abort-on-error \
+      --no-warnings &>"${json}"
+  }
+
+  until [[ -s ${json} ]]; do
+    parseSeriesWithYtd &
+    local pid=$!
+    waitingFor 'youtube-dl to parse series' "${pid}"
+    wait "${pid}" && break
+
+    local exitStatus="$?"
+    # cat "${json}"
+    # echo "${exitStatus}"
+    if [[ ${exitStatus} -eq 101 ]]; then
+      break
+    else
+      if ! handleYtdErrors "${json}"; then
+        rm -f -- "${json}"
+      else
+        assertError
+        exit 1
+      fi
+    fi
+  done
+
+  if [[ ! ${SERIES} ]]; then
+    local series
+    if ! read -r series < <(jq -cr '.series' <"${json}" 2>/dev/null) ||
+      [[ ${series} == 'null' ]]; then
+      assertMissing 'Series title was not found! Trying playlist name...'
+
+      if ! read -r series < <(jq -cr '.playlist' <"${json}" 2>/dev/null) ||
+        [[ ${series} == 'null' ]]; then
+        assertMissing 'Playlist name was not found! Trying title name...'
+
+        if ! read -r series < <(jq -cr '.title' <"${json}" 2>/dev/null) ||
+          [[ ${series} == 'null' ]]; then
+          assertMissing 'Title name was not found!'
+          exit 1
+        fi
+      fi
+    fi
+
+    if ! read -r SERIES < <(safeFilename <<<"${series}"); then
+      assertMissing 'Unable to prase a safe filename from series title:' \
+        "${series}"
+      exit 1
+    fi
+
+    readonly SERIES
+    assertSuccess 'Series:' "${SERIES}"
+  fi
+
+  read -r EXTRACTOR < <(jq -cr '.extractor' <"${json}" 2>/dev/null) ||
+    assertError || exit 1
+  readonly EXTRACTOR
+  assertSuccess 'Exractor:' "${EXTRACTOR}"
+
+  if [[ ! ${EXTRACTOR_CONFIG} ]]; then
+    local extractor
+    read -r extractor < <(safeFilename <<<"${EXTRACTOR%\:*}")
+    local extractorConfFile=${EXTRACTORS_CONFIG_DIR}/${extractor}.conf
+
+    if [[ -f ${extractorConfFile} ]]; then
+      readonly EXTRACTOR_CONFIG=${extractorConfFile}
+      assertSuccess 'Extractor config:' "${EXTRACTOR_CONFIG/#$HOME/\~}"
+    fi
+  fi
+}
+
+addToWatchList() {
+  [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
+  [[ ${SERIES} ]] || assertError || exit 1
+
+  local pipeTitles
+  read -r pipeTitles < <(makeFIFO) || exit 1
+  jq -r '.[][]?.title' 2>/dev/null <<<"${JSON}" >"${pipeTitles}" &
+
+  if ! grep -qxF "${SERIES}" "${pipeTitles}" 2>/dev/null; then
+    local pipeAddToList
+    read -r pipeAddToList < <(makeFIFO) || exit 1
+
+    assertSelection "
+      Add series to 'watching' list
+      Skip (esc)
+    " --disabled >"${pipeAddToList}" &
+
+    local confirmAddToWatchList
+    read -r confirmAddToWatchList <"${pipeAddToList}" || return 0
+
+    if [[ ${confirmAddToWatchList} == 'Add'* ]]; then
+      jq \
+        --arg url "${SERIES_URL}" \
+        --arg title "${SERIES}" \
+        --arg extractor "${EXTRACTOR}" \
+        '.watching += [{ $url, $title, $extractor }]' <<<"${JSON}" \
+        >"${LIST_JSON}" 2>/dev/null || assertError || exit 1
+
+      assertSuccess "Series was added to 'watching' list"
+      assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}"
+    fi
+
+  else
+    local pipeList
+    read -r pipeList < <(makeFIFO) || exit 1
+
+    jq -cr --arg title "${SERIES}" \
+      'keys[] as $list | select(.[$list][].title==$title) | $list' \
+      <<<"${JSON}" >"${pipeList}" 2>/dev/null &
+
+    local list
+    read -r list <"${pipeList}" || assertError || exit 1
+    assertSuccess "Series was found in '${list}' list"
+    assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}"
+  fi
+}
+
+processConfig() {
+  local escape=$1
+
+  if compgen -G "${CONFIG_DIR}/${SERIES}*" >/dev/null; then
+    local pipeFoundConfig
+    read -r pipeFoundConfig < <(makeFIFO) || exit 1
+
+    assertSelection "
+      ${MENU_TOP} Manage Series Config
+      Select a config file for this series
+      Create a new config file for this series
+      ${escape:-Skip} (esc)
+    " --disabled --header-lines 1 --preview-window 'wrap' --preview '
+        echo "Available config files:"
+        xargs -0 basename -a < <(find -- "'"${CONFIG_DIR}/${SERIES}"'"* -print0)
+      ' >"${pipeFoundConfig}" &
+
+    local useExistingConf
+    read -r useExistingConf <"${pipeFoundConfig}" || return 0
+
+    if [[ ${useExistingConf} == 'Select'* ]]; then
+      selectConfigFile "${escape}" || return 1
+    elif [[ ${useExistingConf} == 'Create'* ]]; then
+      createConfigFile
+    fi
+
+  else
+    local pipeNewConfig
+    read -r pipeNewConfig < <(makeFIFO) || exit 1
+
+    assertSelection "
+      ${MENU_TOP} Manage Series Config
+      Create a config file for this series
+      ${escape:-Skip} (esc)
+    " --disabled --header-lines 1 >"${pipeNewConfig}" &
+
+    local createNewConf
+    read -r createNewConf <"${pipeNewConfig}" || return 0
+    [[ ${createNewConf} == 'Create'* ]] && createConfigFile
+    return 0
+  fi
+}
+
 stream() {
+  echo
   assertTask 'Processing stream with MPV...'
   local mpvConf="${HOME}/.config/mpv/mpv.conf"
 
@@ -922,7 +1124,7 @@ stream() {
     fi
   fi
 
-  local mpvArgs=(
+  local -a mpvArgs=(
     "--ytdl-raw-options-append=config-location=$1"
     "${@:2}"
   )
@@ -939,34 +1141,37 @@ stream() {
 
 # shellcheck disable=SC2016
 #! Don't replace `uniq` command with `sort`.
-#* It breaks renameSubtitles function for reversed playlist.
+#* It breaks batchRenameSubtitles function for reversed playlist.
 getVideoID() {
   local pattern="/^\[${EXTRACTOR}\]"'/{a=$0}/'"${*:-1}"'/{print a"\n"$0}'
-  awk "${@:1:$#-1}" "${pattern}" "${DL_LOG}" |
-    grep -F "[${EXTRACTOR}]" |
-    awk '{print $1, $2}' |
-    sed 's/[][]//g;s/://' |
-    uniq
+  uniq <(sed 's/[][]//g;s/://' <(awk '{print $1, $2}' <(
+    grep -F "[${EXTRACTOR}]" <(awk "${@:1:$#-1}" "${pattern}" "${DL_LOG}")
+  )))
 }
 
 archiveVideoID() {
   local archivePath=$1
   local archiveExtra=$2
 
-  if grep -qF 'requested format not available' "${DL_LOG}" 2>/dev/null; then
+  if grep -qF 'Requested format is not available' "${DL_LOG}" 2>/dev/null; then
     echo
     assertTask 'Adding video-IDs with no matching format to archive...'
     local formatNotAvailableIDs
-    formatNotAvailableIDs=$(getVideoID 'format not available')
+    # mapfile -t formatNotAvailableIDs < <(getVideoID 'format is not available')
+    mapfile -t formatNotAvailableIDs < <(sed 's/[][]//g;s/://g' <(
+      awk '{print $2, $3}' <(
+        grep -F 'format is not available' "${DL_LOG}" 2>/dev/null
+      )
+    ))
 
-    if [[ ${formatNotAvailableIDs} ]]; then
-      echo "${formatNotAvailableIDs}" >>"${archiveExtra}" &&
+    if [[ ${#formatNotAvailableIDs[@]} -gt 0 ]]; then
+      printf '%s\n' "${formatNotAvailableIDs[@]}" >>"${archiveExtra}" &&
         assertSuccess 'IDs saved to:' "${archiveExtra/#$HOME/\~}"
 
-      echo "${formatNotAvailableIDs}" >>"${archivePath}" &&
+      printf '%s\n' "${formatNotAvailableIDs[@]}" >>"${archivePath}" &&
         assertSuccess 'IDs saved to:' "${archivePath/#$HOME/\~}"
     else
-      assertError 'could not parse IDs from download log file'
+      assertError 'unable to parse IDs from download log file'
       exit 1
     fi
 
@@ -974,34 +1179,29 @@ archiveVideoID() {
 }
 
 renameSubtitles() {
-  if [[ ${ISO_SUB} != 0 ]]; then
-    renaming() {
-      for file in *.[a-z][a-z][A-Z][A-Z].@(ass|srt|vtt|lrc); do
-        if [[ -f ${file} ]]; then
-          local fileExtension=${file##*.}
-          echo \
-            "${CYAN_TXT}[${MAGENTA_BOLD_TXT}" \
-            "rename subtitle to ISO 639-1" \
-            "${CYAN_TXT}]${RESET}" "$(
-              mv -v -- "${file}" "${file%[A-Z][A-Z].*}.${fileExtension}" |
-                awk -F ' -> ' '{print $2}'
-            )"
-        fi
-      done 2>/dev/null
-    }
+  eval '
+    local mediaFile=${1%.*}
 
-    while pgrep -qP "$1"; do
-      sleep 3
+    local file
+    # for file in "${mediaFile}"*.[a-z][a-z]-[A-Z][A-Z].@(ass|srt|vtt|lrc); do
+    for file in "${mediaFile}"*.[a-z][a-z]-[A-Z][A-Z].ass; do
+      if [[ -f ${file} ]]; then
+        local fileExtension=${file##*.}
+        local renameFile
+        read -r renameFile < <(
+          mv -v -- "${file}" "${file%-[A-Z][A-Z].*}.${fileExtension}"
+        )
+        echo "[ ISO 639-1 subtitle ] ${renameFile#*-> }"
+      fi
+    done 2>/dev/null
+  '
+}
 
-      local videoID
-      local lastVideoID
-      lastVideoID=$(getVideoID '[Vv]ideo subtitle' | sed '$!d')
-      [[ ${lastVideoID} != "${videoID}" ]] || continue
-      sleep 2
-      renaming && videoID="${lastVideoID}"
-    done
-
-    renaming
+batchRenameSubtitles() {
+  if compgen -G ./*.[a-z][a-z]-[A-Z][A-Z].@(ass|srt|vtt|lrc) >/dev/null; then
+    echo
+    assertTask 'Renaming subtitles...'
+    renameSubtitles
   fi
 }
 
@@ -1012,8 +1212,8 @@ processFragmentedDownload() {
 
   local fileExtension=${fragmentedDownload##*.}
   local fragmentedFiles
-  fragmentedFiles=$(
-    find -- "${fragmentedDownload%${fileExtension}}"*"${fileExtension}"* \
+  read -r fragmentedFiles < <(
+    find -- "${fragmentedDownload%$fileExtension}"*"${fileExtension}"* \
       2>/dev/null
   )
 
@@ -1024,22 +1224,23 @@ processFragmentedDownload() {
   fi
 
   local filesToDelete
-  if [[ ${DELETE_FRAG} != 0 ]]; then
+  if [[ ${DELETE_FRAG} -ne 0 ]]; then
     filesToDelete=${fragmentedFiles}
   else
-    local header='Found more than one file. Select one or more files to delete:'
-    filesToDelete=$(
+    local header='Select one or more files to delete:'
+    read -r filesToDelete < <(
       fzf -m --no-select-1 --header "${header}" <<<"${fragmentedFiles}"
     )
   fi
 
   if [[ ${filesToDelete} ]]; then
     local pluralFile
-    pluralFile=$(isPlural "${filesToDelete}")
+    read -r pluralFile < <(isPlural "${filesToDelete}")
+    echo
     assertTask "Deleting fragmented file${pluralFile} from disk..."
     local foundPattern
-    foundPattern=$(
-      grep -oE "${patterns}" "${DL_LOG}" 2>/dev/null | sort --unique
+    read -r foundPattern < <(
+      sort --unique < <(grep -oE "${patterns}" "${DL_LOG}" 2>/dev/null)
     )
 
     if [[ ${foundPattern} ]]; then
@@ -1050,27 +1251,31 @@ processFragmentedDownload() {
     fi
 
     local filesCount
-    filesCount=$(wc -l <<<"${filesToDelete}")
+    read -r filesCount < <(wc -l <<<"${filesToDelete}")
 
     local deleteFragmentedFiles
-    [[ ${DELETE_FRAG} == 0 ]] && deleteFragmentedFiles=$(
+    if [[ ${DELETE_FRAG} -eq 0 ]]; then
+      local pipeDeleteFrag
+      read -r pipeDeleteFrag < <(makeFIFO) || exit 1
+
       assertSelection "
-        Confirm permanently deleting the following file${pluralFile} from disk!
         ${RED_BOLD_TXT}${filesToDelete}${RESET}
-        Yes
-        No
-      " --header-lines "$((filesCount + 1))"
-    )
+        Delete listed file${pluralFile} from disk!
+        Cancel (esc)
+      " --header-lines "${filesCount}" >"${pipeDeleteFrag}" &
+
+      read -r deleteFragmentedFiles <"${pipeDeleteFrag}"
+    fi
 
     local file
-    if [[ ${deleteFragmentedFiles} == 'Yes' || ${DELETE_FRAG} != 0 ]]; then
+    if [[ ${deleteFragmentedFiles} == 'Delete'* || ${DELETE_FRAG} -ne 0 ]]; then
       while IFS= read -r file; do
         rm -f -- "${PWD}/${file}" 2>/dev/null
 
         if [[ ! -f ${file} ]]; then
           assertSuccess 'Deleted:' "${file}"
         else
-          assertMissing 'Could not delete:' "${file}"
+          assertMissing 'Unable to delete:' "${file}"
         fi
 
       done <<<"${filesToDelete}"
@@ -1084,26 +1289,28 @@ processFragmentedDownload() {
     echo
     assertTask 'Removing fragmented video-ID from archive...'
     local fragmentedID
-    fragmentedID=$(getVideoID "${patterns}")
+    read -r fragmentedID < <(getVideoID "${patterns}")
 
     if [[ ${fragmentedID} ]]; then
       if grep -qxF "${fragmentedID}" "${archivePath}" 2>/dev/null; then
-        assertSuccess 'Backup:' "$(cp -v -- "${archivePath/#$HOME/\~}"{,.bak})"
+        local archiveBackup
+        read -r archiveBackup < <(cp -v -- "${archivePath/#$HOME/\~}"{,.bak})
+        assertSuccess 'Backup:' "${archiveBackup#*-> }"
         sed -ni "/^${fragmentedID}$/!p" "${archivePath}"
 
         if ! grep -qxF "${fragmentedID}" "${archivePath}" 2>/dev/null; then
           assertSuccess 'Removed ID:' "${fragmentedID}"
         else
-          assertMissing 'Could not remove ID:' "${fragmentedID}"
+          assertMissing 'Unable to remove ID:' "${fragmentedID}"
           exit 1
         fi
 
       else
-        assertSuccess 'No fragemented video-IDs found in archive'
+        assertSuccess 'No fragemented video-IDs were found in archive'
       fi
 
     else
-      assertError 'could not parse fragmented video-IDs'
+      assertError 'unable to parse fragmented video-IDs'
       exit 1
     fi
 
@@ -1128,94 +1335,99 @@ fragmentMonitor() {
     fi
   done
 
-  pkill -f -- "youtube-dl ${ytdArgs}"
-  while pgrep -qf -- "youtube-dl ${ytdArgs}"; do
+  pkill -f -- yt-dlp "${ytdArgs}"
+  while pgrep -qf -- "yt-dlp ${ytdArgs//\[/\\\[}"; do
     sleep 1
   done
 
   echo
-  assertError 'fragment error detected!'
-  echo
   assertTask 'Terminating download process...'
+  assertMissing 'fragment error detected!'
   kill -SIGTERM -- -"${downloadPID}" &>/dev/null
 
   while pgrep -qP "${downloadPID}"; do
     sleep 1
   done
 
-  assertSuccess "Download process has been terminated\n"
+  assertSuccess "Download process has been terminated"
   return 1
+}
+
+getBaseDir() {
+  local path=$1
+
+  local evaluatedPath
+  read -r evaluatedPath < <(eval echo "${path}")
+
+  local baseDir
+  read -r baseDir < <(dirname "${evaluatedPath}")
+
+  if cd "${baseDir}" 2>/dev/null; then
+    pwd
+  else
+    assertError 'unable to access the base directory of file:' "$1"
+  fi
+}
+
+youtubeDl() {
+  declare -xf renameSubtitles
+  #! Keep the following command inside this function!
+  #* Otherwise, user won't be able to interrupt download process with CTL+C.
+  script -q "${DL_LOG}" yt-dlp "$@"
 }
 
 download() {
   local archiveDir
   local archivePath
   if [[ ${ARCHIVE_PATH} ]]; then
-    if ! archiveDir=$(
-      cd "$(dirname "$(eval echo "${ARCHIVE_PATH}")")" 2>/dev/null && pwd
-    ); then
-      assertError 'cannot access the provided directory for download-archive!'
-      exit 1
-    fi
-
-    archivePath=${archiveDir}/$(basename "${ARCHIVE_PATH}")
+    read -r archiveDir < <(getBaseDir "${ARCHIVE_PATH}") || exit 1
+    archivePath=${archiveDir}/${ARCHIVE_PATH##*\/}
   fi
 
-  if [[ ${DOWNLOAD_DIR} || ${MAKE_SUB_DIR} != 0 ]]; then
-    assertTask 'Changing directory...'
-
+  if [[ ${DOWNLOAD_DIR} || ${MAKE_SUB_DIR} -ne 0 ]]; then
     [[ ${DOWNLOAD_DIR} ]] && if ! cd "${DOWNLOAD_DIR}" 2>/dev/null; then
-      assertError 'could not change to Clanime Downloads directory'
+      assertError 'unable to change to Clanime Downloads directory'
       exit 1
     fi
 
-    if [[ ${MAKE_SUB_DIR} != 0 ]]; then
+    if [[ ${MAKE_SUB_DIR} -ne 0 ]]; then
       mkdir -p "${SERIES}" 2>/dev/null
       if ! cd "${SERIES}" 2>/dev/null; then
-        assertError 'could not change to series directory'
+        assertError 'unable to change to series directory'
         exit 1
       fi
     fi
 
-    assertSuccess 'Download directory:' "${PWD/#$HOME/\~}\n"
+    assertSuccess 'Download directory:' "${PWD/#$HOME/\~}"
   fi
 
   #* Keep the following archive variables here.
   #* They must refer to the active directory
   if [[ ! ${ARCHIVE_PATH} ]]; then
-    if archiveFromConfig=$(
-      grep '^--download-archive ' "$1" 2>/dev/null |
-        tail -n 1 |
-        awk '{print $2}' |
-        sed -E "s/'|\"//g"
+    local archiveFromConfig
+    # if read -r archiveFromConfig < <(sed -E "s/'|\"//g" <(awk '{print $2}' <(
+    if read -r archiveFromConfig < <(
+      sed -E "s/^\s*--download-archive //;s/^('|\")//;s/('|\")$//" <(
+        tail -n 1 <(grep '^\s*--download-archive ' "$1" 2>/dev/null)
+      )
     ); then
-
-      if ! archiveDir=$(
-        cd "$(dirname "$(eval echo "${archiveFromConfig}")")" 2>/dev/null && pwd
-      ); then
-        assertError 'cannot access the provided directory for download-archive!'
-        exit 1
-      fi
-
-      archivePath=${archiveDir}/$(basename "${archiveFromConfig}")
+      # ))); then
+      read -r archiveDir < <(getBaseDir "${archiveFromConfig}") || exit 1
+      archivePath=${archiveDir}/${archiveFromConfig##*\/}
     else
       archiveDir=${PWD}
       archivePath=${archiveDir}/archive.txt
     fi
   fi
 
-  local archiveFileExt=${archivePath##*.}
-  local archiveExtra=${archivePath%.*}-extra.${archiveFileExt}
+  local archiveExtra=${archivePath%.*}-extra.${archivePath##*.}
   # --***-- #
-
-  assertTask 'Downloading with youtube-dl...'
-  readonly DL_LOG="${TMP_DIR}/clanime.log"
 
   if [[ -w ${archiveDir} ]]; then
     assertSuccess 'Download archive:' "${archivePath/#$HOME/\~}"
   else
     assertMissing 'Download archive path:' "${archivePath/#$HOME/\~}"
-    assertError 'invalid download archive path.' \
+    assertMissing 'Invalid download archive path.' \
       'Make sure to set a valid path with writting permission!!!'
     exit 1
   fi
@@ -1233,57 +1445,65 @@ download() {
 
   promptAutonumber() {
     local number
-    number=$(readPrompt '--autonumber-start ' '1')
+    read -r number < <(readPrompt '--autonumber-start ' '1')
     isPositiveInteger "${number}"
   }
 
-  youtubeDl() {
-    #! Keep the following command inside this function!
-    #* Otherwise, user won't be able to interrupt download process with CTL+C.
-    script -q "${DL_LOG}" youtube-dl "$@"
-  }
+  read -r DL_LOG < <(makeTEMP 'yt-dlp-log') || exit 1
+  readonly DL_LOG
 
-  local ytdArgsModel=(
+  local -a ytdArgsModel=(
     '--config-location' "$1"
     '--download-archive' "${archivePath}"
     "${@:2}"
   )
 
   local patterns
-  patterns=$(trimWhiteSpace "${YTD_ERRORS}" | paste -sd '|' -)
+  read -r patterns < <(paste -sd '|' <(trimWhiteSpace "${YTD_ERRORS}"))
 
-  local isAutonumber
-  isAutonumber=$(
+  local hasAutonumber
+  read -r hasAutonumber < <(
     grep -E '\s*(--output |-o ).*%\(autonumber\)' <<<"$*" 2>/dev/null ||
-      grep -E '^\s*(--output |-o ).*%\(autonumber\)' "${SERIES_CONFIG}" \
+      grep -E '^\s*(--output |-o ).*%\(autonumber\)' "$1" \
         2>/dev/null
   )
 
   local startNumber=${AUTONUMBER}
   local maxAttempts=10
+  local -a range
+  mapfile -t range < <(seq ${maxAttempts})
 
-  for retry in $(eval echo "{1..$((maxAttempts + 1))}"); do
-    local ytdArgs
+  for retry in ${range[*]}; do
+    local -a ytdArgs
     if [[ ${startNumber} ]]; then
       ytdArgs=('--autonumber-start' "${startNumber}" "${ytdArgsModel[@]}")
 
-    elif [[ ${isAutonumber} ]]; then
+    elif [[ ${hasAutonumber} ]]; then
       assertWarning "you are using 'autonumber' in filename output."
       assertTip "pass the next episode number with 'autonumber-start' option."
 
       local latest
-      latest=$(findLastVidoAdded)
+      read -r latest < <(findLastVidoAdded)
       if [[ ${latest} ]]; then
         assertTip 'the following file is potentially the last episode added!'
         echo "${latest}"
       fi
 
       echo
-      readHeader 'Edit the number below (then press [ENTER])'
-
-      until startNumber=$(promptAutonumber); do
-        assertMissing 'Invalid autonumber-start value!' \
-          'It must be an integer number that is greater than 0.'
+      while true; do
+        readHeader 'Edit the number below (then press [ENTER])'
+        if ! read -r startNumber < <(promptAutonumber); then
+          clearLines 3
+          assertMissing 'Invalid autonumber-start value!' \
+            'It must be an integer that is greater than 0.'
+        else
+          if [[ ${latest} ]]; then
+            clearLines 7
+          else
+            clearLines 5
+          fi
+          break
+        fi
       done
 
       ytdArgs=('--autonumber-start' "${startNumber}" "${ytdArgsModel[@]}")
@@ -1291,54 +1511,64 @@ download() {
       ytdArgs=("${ytdArgsModel[@]}")
     fi
 
+    # local execFromConfig
+    # read -r execFromConfig < <(paste -sd ';' <(
+    #   sed -E "s/^\s*--exec //;s/^('|\")//;s/('|\")$//" <(
+    #     grep '^\s*--exec ' "$1" 2>/dev/null
+    #   )
+    # ))
+
+    # local execAll="${execFromConfig}; ${EXEC}"
+
+    # shellcheck disable=SC2016
+    # if [[ ${ISO_SUB} -ne 0 ]]; then
+    #   ytdArgs+=(
+    #     '--exec'
+    #     "bash -c 'shopt -s extglob; renameSubtitles \"\$1\"' -- {}; ${execAll}"
+    #   )
+    # elif [[ ${EXEC} || ${execFromConfig} ]]; then
+    #   ytdArgs+=('--exec' "${execAll}")
+    # fi
+
+    echo
+    assertTask "Downloading with youtube-dl [attempt ${retry} of 10]..."
     youtubeDl "${ytdArgs[@]}" &
     local youtubeDLPID=$!
 
-    until pgrep -qf -- 'youtube-dl' "${ytdArgs[@]}"; do
+    until pgrep -qf -- 'yt-dlp' "${ytdArgs[@]//\[/\\\[}"; do
       echo -ne \
         "${CYAN_TXT}[${MAGENTA_BOLD_TXT}" \
         'sleeping' \
         "${CYAN_TXT}]${RESET}" \
-        'Waiting for youtube-dl process... \r'
+        'Waiting for yt-dlp process... \r'
       sleep 1
-      pgrep -qP "${youtubeDLPID}" || break
+      pgrep -qP "${youtubeDLPID}" || exit 1
     done
-
-    renameSubtitles "${youtubeDLPID}" &
-    local renameSubtitlesPID=$!
 
     if ! fragmentMonitor \
       "${patterns}" "${youtubeDLPID}" "${ytdArgs[@]}"; then
+      local pipeFragDownload
+      read -r pipeFragDownload < <(makeFIFO) || exit 1
+
+      awk '/^\[download\] Destination/{a=$0}/'"${patterns}"'/{print a"\n"$0}' \
+        "${DL_LOG}" >"${pipeFragDownload}" 2>/dev/null &
+
       local fragmentedDownload
-      fragmentedDownload=$(
-        awk \
-          '/^\[download\] Destination/{a=$0}/'"${patterns}"'/{print a"\n"$0}' \
-          "${DL_LOG}" |
-          grep -F '[download] Destination' |
-          head -n 1 |
-          awk -F ': ' '{print $2}' |
-          tr -d '\r'
-      )
+      read -r fragmentedDownload < <(tr -d '\r' < <(awk -F ': ' '{print $2}' <(
+        head -n 1 <(grep -F '[download] Destination' "${pipeFragDownload}")
+      )))
 
       processFragmentedDownload \
         "${fragmentedDownload}" "${patterns}" "${archivePath}"
     fi
 
-    wait "${youtubeDLPID}" "${renameSubtitlesPID}"
-    archiveVideoID "${archivePath}" "${archiveExtra}"
-
-    local error403='HTTP Error 403: Forbidden'
-    if ! grep -qF "${error403}" "${DL_LOG}" 2>/dev/null; then
-      [[ ! ${fragmentedDownload} ]] && break
-    else
-
-      if grep -q '^--cookies ' "${EXTRACTOR_CONFIG}" 2>/dev/null ||
-        [[ $* =~ '--cookies ' ]]; then
-        echo
-        assertTip 'provide new cookies!'
+    wait "${youtubeDLPID}"
+    # archiveVideoID "${archivePath}" "${archiveExtra}"
+    handleYtdErrors "${DL_LOG}" 'download' &&
+      if [[ ! ${fragmentedDownload} ]]; then
+        [[ ${BATCH_ISO_SUB} -eq 1 ]] && batchRenameSubtitles
+        break
       fi
-      assertTryAgain
-    fi
 
     unset -v fragmentedDownload
     unset -v youtubeDLPID
@@ -1346,13 +1576,14 @@ download() {
     unset -v startNumber
     unset -v latest
 
-    if [[ ${retry} -gt 10 ]]; then
-      assertError 'maximum retry attempts reached. Try again later!'
+    if [[ ${retry} -eq 10 ]]; then
+      assertMissing 'maximum download attempts has been reached.' \
+        'Please try again later!'
       exit 1
     fi
 
     echo
-    assertTask "Retrying attempt ${retry} of 10..."
+    assertTask "Downloading with youtube-dl [attempt $((retry + 1)) of 10]..."
 
     for second in {15..2}; do
       echo -ne \
@@ -1369,95 +1600,159 @@ download() {
       "${CYAN_TXT}]${RESET}" \
       "1 second... \r"
     sleep 1
+    clearLines 2
   done
 }
 
 downloadOrStream() {
-  streamOrDownload=${1:-$(
-    assertSelection '
-      Stream
-      Download
-    '
-  )}
+  local streamOrDownload=$1
+  [[ ${streamOrDownload} ]] || if command -v mpv >/dev/null; then
+    read -r streamOrDownload < <(assertSelection 'Stream \n Download')
+  else
+    streamOrDownload='Download'
+  fi
 
-  local concatConf="${TMP_DIR}/clanime.conf"
+  local concatConf
+  read -r concatConf < <(makeTEMP 'config') || exit 1
 
   cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" "${SERIES_CONFIG}" \
     >"${concatConf}" 2>/dev/null
 
   if [[ ${streamOrDownload} == 'Stream' ]]; then
+    assertSuccess 'Stream series with MPV media player'
+
     if [[ $* =~ '--playlist=' ]]; then
       stream "${concatConf}" "${@:2}"
+      exit
     else
       stream "${concatConf}" "${@:2}" -- "${SERIES_URL}"
+      exit
     fi
 
   elif [[ ${streamOrDownload} == 'Download' ]]; then
+    assertSuccess 'Download series with youtube-dl'
+
     if [[ $* =~ ('-a '|'--batch-file ') ]]; then
       download "${concatConf}" "${@:2}"
+      exit
     else
       download "${concatConf}" "${@:2}" "${SERIES_URL}"
+      exit
     fi
 
   else
-    assertTryAgain downloadOrStream "$@"
+    assertMissing 'Exiting...'
+    exit 1
+  fi
+}
+
+parseListTitles() {
+  local selectedList=$1
+
+  if ! jq -cr --arg list "${selectedList}" '.[$list][].title' <<<"${JSON}" \
+    2>/dev/null; then
+    assertError 'unable to parse titles from list!'
+    exit 1
   fi
 }
 
 selectFromList() {
-  local json
-  json=$(cat "${LIST_JSON}")
+  local selectedList=$1
+
+  local pipeTitles
+  read -r pipeTitles < <(makeFIFO) || exit 1
+  parseListTitles "${selectedList}" >"${pipeTitles}" &
+
+  local header
+  read -r header < <(echo -e "${MENU_END} Select a series from the list:")
+  local series
+  read -r series < <(fzf --header "${header}" <"${pipeTitles}") || return 1
+  readonly SERIES=${series}
+
+  local pipeObject
+  read -r pipeObject < <(makeFIFO) || exit 1
+
+  jq -c --arg list "${selectedList}" --arg title "${SERIES}" \
+    '.[$list][] | select(.title==$title)' <<<"${JSON}" >"${pipeObject}" \
+    2>/dev/null || assertError || exit 1 &
+
+  local seriesObject
+  read -r seriesObject <"${pipeObject}" || exit 1
+  read -r SERIES_URL < <(jq -cr '.url' <<<"${seriesObject}" 2>/dev/null)
+  read -r EXTRACTOR < <(jq -cr '.extractor' <<<"${seriesObject}" 2>/dev/null)
+
+  readonly SERIES_URL
+  readonly EXTRACTOR
+
+  if [[ ! ${SERIES_URL} || ${SERIES_URL} == 'null' ]]; then
+    assertError 'invalid url value!'
+    exit 1
+  elif [[ ! ${EXTRACTOR} || ${EXTRACTOR} == 'null' ]]; then
+    assertError 'invalid extractor value!'
+    exit 1
+  fi
+
+  local extractor
+  read -r extractor < <(safeFilename <<<"${EXTRACTOR%\:*}")
+  local extractorConfFile=${EXTRACTORS_CONFIG_DIR}/${extractor}.conf
+
+  assertSuccess 'Series:' "${SERIES}"
+  assertSuccess 'URL:' "${SERIES_URL}"
+  assertSuccess 'Extractor:' "${EXTRACTOR}"
+
+  if [[ -f ${extractorConfFile} ]]; then
+    readonly EXTRACTOR_CONFIG=${extractorConfFile}
+    assertSuccess 'Extractor config:' "${EXTRACTOR_CONFIG/#$HOME/\~}"
+  fi
+}
+
+selectList() {
+  local keys=$1
+  local header=$2
+  local hide=$3
+
+  local pipeLists
+  read -r pipeLists < <(makeFIFO) || exit 1
+  grep -vixF "${hide} List" <(browseList "${keys}") >"${pipeLists}" \
+    2>/dev/null &
+
+  local -a lists
+  mapfile lists <"${pipeLists}"
+
+  local pipeSelectedList
+  read -r pipeSelectedList < <(makeFIFO) || exit 1
+  # shellcheck disable=SC2016,SC1004
+  assertSelection "
+    ${header}
+    ${lists[*]}
+  " --header-lines 1 --no-select-1 --preview '
+      read -r list < <(grep -ixF {..-2} <(jq -nr '\'"${ACTIVE_KEYS}"'|.[]'\''))
+      head -n ${FZF_PREVIEW_LINES} <(
+        jq -cr --arg list "${list}" '\''.[$list][]?.title'\'' <'"${LIST_JSON}"'
+      )
+    ' >"${pipeSelectedList}" &
 
   local selectedList
-  selectedList=$(jq -cr 'keys[]' <<<"${json}" | grep -ixF "$1")
+  read -r selectedList <"${pipeSelectedList}" || return 1
+  grep -ixF "${selectedList/' List'/}" <(jq -r '.[]' <<<"${keys}") \
+    2>/dev/null || assertError 'unable to match list in json file!' || exit 1
+}
 
-  SERIES=$(
-    jq --arg list "${selectedList}" -cr '.[$list][].title' <<<"${json}" | fzf
-  )
-
-  SERIES_URL=$(
-    jq -cr \
-      --arg list "${selectedList}" \
-      --arg title "${SERIES}" \
-      '.[$list][] | select(.title==$title).url' <<<"${json}"
-  )
-
-  EXTRACTOR=$(
-    jq -cr \
-      --arg list "${selectedList}" \
-      --arg title "${SERIES}" \
-      '.[$list][] | select(.title==$title).extractor' <<<"${json}"
-  )
-
-  if [[ ${SERIES} ]]; then
-    if [[ ! ${SERIES_URL} ]]; then
-      assertError 'could not parse series url from list!'
-      exit 1
-    fi
-
-    if [[ ! ${EXTRACTOR} ]]; then
-      assertError 'could not parse series extractor from list!'
-      exit 1
-    fi
-
-    local extractorConf
-    extractorConf=$(safeFilename <<<"${EXTRACTOR%\:*}")
-    EXTRACTOR_CONFIG=${EXTRACTORS_CONFIG_DIR}/${extractorConf}.conf
-
-    assertSuccess 'Extractor:' "${EXTRACTOR}"
-    if [[ -f ${EXTRACTOR_CONFIG} ]]; then
-      assertSuccess 'Extractor config:' "${EXTRACTOR_CONFIG/#$HOME/\~}"
-    else
-      assertMissing 'Extractor config not found:' \
-        "${EXTRACTOR_CONFIG/#$HOME/\~}"
-      unset EXTRACTOR_CONFIG
-    fi
-
-    assertSuccess 'Series:' "${SERIES}"
-    assertSuccess 'URL:' "${SERIES_URL}\n"
-  else
-    assertTryAgain selectFromList "$@"
+backupList() {
+  if ! mkdir -p "${LIST_JSON_BACKUP_DIR}" 2>/dev/null; then
+    assertError 'could not create list backup directory:' \
+      "${LIST_JSON_BACKUP_DIR}"
+    exit 1
   fi
+
+  local backupDate
+  read -r backupDate < <(date '+%Y-%m-%d_%H-%M-%S')
+  local backupPath
+  read -r backupPath < <(
+    cp -v -- "${LIST_JSON}" \
+      "${LIST_JSON_BACKUP_DIR}/${LIST_JSON##*\/}.${backupDate}.bak"
+  )
+  assertSuccess 'Backup list:' "${backupPath/#*-> $HOME/\~}"
 }
 
 moveToList() {
@@ -1465,126 +1760,158 @@ moveToList() {
   local to=$2
 
   if [[ ! -f ${LIST_JSON} ]]; then
-    assertError 'List "JSON" file not found:' "${LIST_JSON}"
+    assertError "list 'JSON' file was not found: ${LIST_JSON}"
     exit 1
   fi
 
-  local json
-  json=$(cat "${LIST_JSON}")
+  local header
+  if [[ ${to} == 'delete' ]]; then
+    header='Delete series'
+  elif [[ ${to} ]]; then
+    header="Move series to '${to}' list"
+  else
+    header='Move series'
+  fi
+
+  local fromListHeader
+  fromListHeader="${MENU_NAV} ${header} from..."
 
   if [[ ${from} ]]; then
-    if ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${from}"; then
+    if ! grep -qxF "${from}" <(jq -r '.[]' <<<"${ACTIVE_KEYS}"); then
       assertError "'${from}' list is not available!"
       exit 1
     fi
   else
-    local fromList
-    if ! fromList=$(
-      assertSelection "
-        $([[ ${to} == 'delete' ]] && echo 'Delete' || echo 'Move') series from:
-        $(browseListAll <<<"${json}" | grep -vxF "${to^} List")
-      " --header-lines 1 | sed 's/ List$//'
-    ); then
-      assertMissing 'Aborted by user'
-      exit
-    fi
+    local pipeFromList
+    read -r pipeFromList < <(makeFIFO) || exit 1
+    selectList "${ACTIVE_KEYS}" "${fromListHeader}" "${to}" >"${pipeFromList}" &
+    read -r from <"${pipeFromList}" || return 2
+  fi
 
-    if ! from=$(jq -cr 'keys[]' <<<"${json}" | grep -ixF "${fromList}"); then
-      assertError "'${from}' list is not available!"
-      exit 1
-    fi
+  local pipeSeries
+  read -r pipeSeries < <(makeFIFO) || exit 1
+
+  if [[ ${SERIES} ]]; then
+    echo "${SERIES}" >"${pipeSeries}" &
+  else
+    local pipeTitles
+    read -r pipeTitles < <(makeFIFO) || exit 1
+    parseListTitles "${from}" >"${pipeTitles}" &
+
+    local seriesListHeader
+    read -r seriesListHeader < <(
+      echo -e "${MENU_INT} Select one or more series from list:"
+    )
+
+    # shellcheck disable=SC2016
+    fzf <"${pipeTitles}" -m --no-select-1 \
+      --header "${seriesListHeader}" \
+      --preview 'head -n ${FZF_PREVIEW_LINES} <(printf "%s\n" {+})' \
+      >"${pipeSeries}" &
   fi
 
   local series
-  if [[ ${SERIES} ]]; then
-    series=$(jq -cR <<<"${SERIES}" | jq -cs)
-  else
-    series=$(
-      jq -cr --arg list "${from}" '.[$list][]?.title' <<<"${json}" |
-        fzf -m --no-select-1 |
-        jq -cR |
-        jq -cs
-    )
-  fi
+  read -r series < <(jq -cs < <(jq -cR <"${pipeSeries}")) || return 1
+  [[ ! ${series} || ${series} == '[]' ]] && return 1
 
-  if [[ ${series} == '[]' ]]; then
-    assertMissing 'Transfer process was canceled!'
-    exit
-  fi
+  local pipeObjectsList
+  read -r pipeObjectsList < <(makeFIFO) || exit 1
+
+  jq -c --argjson series "${series}" --arg list "${from}" \
+    '.[$list] | map(select(.title as $title | $series | index($title)))' \
+    <<<"${JSON}" 2>/dev/null >"${pipeObjectsList}" &
 
   local objectsList
-  objectsList=$(
-    jq --argjson series "${series}" --arg list "${from}" -c \
-      '.[$list] | map(select(.title as $title | $series | index($title)))' \
-      <<<"${json}"
-  )
+  read -r objectsList <"${pipeObjectsList}"
+  [[ ${objectsList} && ${objectsList} != '[]' ]] || assertError || exit 1
 
   if [[ ${to} ]]; then
     if [[ ! ${to} =~ ('delete'|'archive') ]] &&
-      ! jq -cr 'keys[]' <<<"${json}" | grep -qxF "${to}"; then
+      ! grep -qxF "${to}" <(jq -r '.[]' <<<"${ALL_KEYS}"); then
       assertError "'${to}' list is not available!"
       exit 1
     fi
   else
-    local toList
-    if ! toList=$(
-      assertSelection "
-        Move series to:
-        $(browseListAll <<<"${json}" | grep -vxF "${from^} List")
-      " --header-lines 1 | sed 's/ List$//'
-    ); then
-      assertMissing 'Aborted by user'
-      exit
-    fi
-
-    if ! to=$(jq -cr 'keys[]' <<<"${json}" | grep -ixF "${toList}"); then
-      assertError "'${to}' list is not available!"
-      exit 1
-    fi
+    local pipeToList
+    read -r pipeToList < <(makeFIFO) || exit 1
+    selectList "${ALL_KEYS}" "
+      ${MENU_END} ${fromListHeader/@("${MENU_NAV} "|'...')/} '${from}' list to:
+    " "${from}" >"${pipeToList}" &
+    read -r to <"${pipeToList}" || return 1
   fi
 
-  backupList() {
-    local backupDir
-    backupDir=$(dirname "${LIST_JSON}")/list-backup
-    if ! mkdir -p "${backupDir}" 2>/dev/null; then
-      assertError 'could not create list backup directory:' "${backupDir}"
-      exit 1
-    fi
-
-    assertSuccess 'Backup list:' "$(
-      cp -v -- "${LIST_JSON}" \
-        "${backupDir}/$(basename "${LIST_JSON}").$(date '+%Y-%m-%d_%s')".bak |
-        awk -F ' -> ' '{print $2}' |
-        sed "s;${HOME};~;"
-    )"
-  }
-
   if [[ ${to} == 'delete' ]]; then
+    assertWarning 'associated config files will be permanently deleted' \
+      'from disk if you chose to delete them'
     assertWarning 'the following series will be permanently deleted from' \
-      "'${from^}' list"
+      "'${from}' list"
     jq -cr 'map("- "+.)[]' <<<"${series}"
 
-    confirmDelete=$(
-      assertSelection '
-        Are you sure about that?
-        Yes
-        No
-      ' --header-lines 1
+    local sereisItemsNo
+    read -r sereisItemsNo < <(jq 'length' <<<"${series}")
+    local maybeThem
+    read -r maybeThem < <(
+      [[ ${sereisItemsNo} -gt 1 ]] && echo them || echo it
     )
+    local deletOption="Delete ${maybeThem} from list"
+    local pipeConfirmDelete
+    read -r pipeConfirmDelete < <(makeFIFO) || exit 1
 
-    if [[ ${confirmDelete} == 'Yes' ]]; then
-      if ! backupList || ! jq --argjson objectsList "${objectsList}" \
-        --arg fromList "${from}" \
-        '.[$fromList] -= $objectsList' <<<"${json}" \
-        >"${LIST_JSON}"; then
-        assertError
-        exit 1
+    assertSelection "
+      ${deletOption}!
+      ${deletOption} along with associated config files!
+      Abort (esc)
+    " --disabled >"${pipeConfirmDelete}" &
+
+    local confirmDelete
+    read -r confirmDelete <"${pipeConfirmDelete}"
+    if [[ ${confirmDelete} == "${deletOption}"* ]]; then
+      backupList || exit 1
+
+      jq --argjson objectsList "${objectsList}" --arg fromList "${from}" \
+        '.[$fromList] -= $objectsList' <<<"${JSON}" \
+        >"${LIST_JSON}" 2>/dev/null &
+
+      local pid=$!
+      waitingFor 'jq to rebuild list file' "${pid}"
+
+      if wait "${pid}"; then
+        local maybeWere
+        read -r maybeWere < <(
+          [[ ${sereisItemsNo} -gt 1 ]] && echo were || echo was
+        )
+        assertSuccess "Series ${maybeWere} deleted from '${from}' list"
+        assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}"
+
+        if [[ ${confirmDelete} == "${deletOption} along"* ]]; then
+          local pipeConfig
+          read -r pipeConfig < <(makeFIFO) || exit 1
+
+          local title
+          while IFS= read -r title; do
+            # findConfig "${title}" # make it interactive?
+            find -- "${CONFIG_DIR}/${title}"*.conf 2>/dev/null
+          done < <(jq -r '.[]' <<<"${series}") >"${pipeConfig}" &
+
+          local configFile
+          while IFS= read -r configFile; do
+            rm -f -- "${configFile}" 2>/dev/null
+
+            if [[ ! -f ${configFile} ]]; then
+              assertSuccess 'Config file was deleted:' "${configFile##*\/}"
+            else
+              assertMissing 'Unable to delete:' "${configFile##*\/}"
+            fi
+
+          done <"${pipeConfig}"
+        fi
+        exit
       else
-        assertSuccess "Series deleted from '${from^}' list"
-        return
+        assertError 'jq failed to rebuild the list!'
+        exit 1
       fi
     else
-      assertMissing 'Aborted by user'
+      assertMissing 'Exiting...'
       exit
     fi
   fi
@@ -1592,12 +1919,12 @@ moveToList() {
   if ! backupList || ! jq --argjson objectsList "${objectsList}" \
     --arg fromList "${from}" \
     --arg toList "${to}" \
-    '.[$toList] += $objectsList | .[$fromList] -= $objectsList' <<<"${json}" \
+    '.[$toList] += $objectsList | .[$fromList] -= $objectsList' <<<"${JSON}" \
     >"${LIST_JSON}"; then
     assertError
     exit 1
   else
-    assertSuccess "Series transfered from '${from^}' list to '${to^}' list"
+    assertSuccess "Series transfered from '${from}' list to '${to}' list"
     if [[ ! ${SERIES} ]]; then
       jq -cr 'map("- "+.)[]' <<<"${series}"
     else
@@ -1606,206 +1933,495 @@ moveToList() {
   fi
 }
 
-browseListAll() {
-  jq -cr 'keys_unsorted[]' | sed 's/./\u&/;s/$/ List/'
-}
+waitingFor() {
+  local processMessage=$1
+  local pid=$2
 
-browseList() {
-  jq -c '
-    walk(if type=="object" then with_entries(select(.value!=[])) else . end)
-  ' "${LIST_JSON}" | browseListAll
-}
+  local maxDuration=30
+  local duration
+  local -a range
+  mapfile -t range < <(seq ${maxDuration})
 
-browse() {
-  if [[ ! $1 ]]; then
-    exit 1
-  else
-    assertTask "Awaiting user selection from '${1^}' list..."
-    selectFromList "$1"
+  for duration in ${range[*]}; do
+    local dots
+    read -r dots < <(perl -E "print '.' x ${duration}")
 
-    if [[ $1 == 'Archive' ]]; then
-      local confirmMove
-      confirmMove=$(
-        assertSelection '
-          Do you want to move this series to another list?
-          Yes
-          No
-        ' --header-lines 1
-      )
+    echo -ne \
+      "${CYAN_TXT}[${MAGENTA_BOLD_TXT}" \
+      'sleeping' \
+      "${CYAN_TXT}]${RESET}" \
+      "Waiting for ${processMessage}..${dots} \r"
+    sleep 1
 
-      if [[ ${confirmMove} == 'Yes' ]]; then
-        assertTask 'Moving series from archive...'
-        moveToList 'archive'
-      fi
+    if ! pgrep -qP "${pid}"; then
+      echo -e '\e[K\e[1A'
+      break
     fi
 
-  fi
-}
-
-configProcessOptions() {
-  local processOption
-  processOption=$(
-    assertSelection "
-      Process configurations of a series from...
-      $(browseList)
-    " --header-lines 1
-  )
-
-  assertSuccess "Process series config from: ${processOption}\n"
-  browse "${processOption%' List'}"
-
-  while true; do
-    processConfig
-
-    local repeat
-    repeat=$(
-      assertSelection '
-        Process another config file for selected series
-        Cancel
-      '
-    )
-
-    if [[ ${repeat} != 'Process'* ]]; then
-      assertSuccess 'Done'
-      break
+    if [[ ${duration} -eq "${maxDuration}" ]]; then
+      echo -e '\e[K\e[1A'
+      assertError 'time out! Please try again later!'
+      kill -SIGTERM -- -"${pid}" &>/dev/null
+      exit 1
     fi
   done
 }
 
-processExtractorEntry() {
-  assertTask 'Validating extractor with youtube-dl...'
+deleteList() {
+  local pipeSelectedList
+  read -r pipeSelectedList < <(makeFIFO) || exit 1
+  selectList "${ALL_KEYS}" "${MENU_NAV} Delete..." 'watching' \
+    >"${pipeSelectedList}" &
 
-  local extractorEntry
-  if ! extractorEntry=$(
-    youtube-dl --list-extractors |
-      grep -iF "${EXTRACTOR_ENTRY}" |
-      head -n 1
-  ); then
-    assertError 'extractor not found in yotube-dl list!'
+  local selectedList
+  read -r selectedList <"${pipeSelectedList}" || return 2
+
+  assertWarning "'${selectedList}' list will be permanently deleted!"
+
+  local pipeConfirmDelete
+  read -r pipeConfirmDelete < <(makeFIFO) || exit 1
+
+  assertSelection "
+    ${RED_BOLD_TXT}Confirm deletion!${RESET}
+    Abort (esc)
+  " --disabled >"${pipeConfirmDelete}" &
+
+  local confirmDelete
+  read -r confirmDelete <"${pipeConfirmDelete}"
+
+  if [[ ${confirmDelete} != 'Confirm'* ]]; then
+    assertMissing 'Exiting...'
     exit 1
   fi
 
-  local extractorConf
-  extractorConf=$(safeFilename <<<"${extractorEntry%\:*}")
-  EXTRACTOR_CONFIG=${EXTRACTORS_CONFIG_DIR}/${extractorConf}.conf
+  backupList || exit 1
+
+  jq --arg list "${selectedList}" 'del(.[$list])' <<<"${JSON}" >"${LIST_JSON}" \
+    2>/dev/null
+
+  local pid=$!
+  waitingFor 'jq to rebuild list file' "${pid}"
+  if wait "${pid}"; then
+    assertSuccess "'${selectedList}' list was deleted"
+    assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}"
+    exit
+  else
+    assertError
+    exit 1
+  fi
+}
+
+renameList() {
+  local old=$1
+  local new=$2
+  jq --arg old "${old}" --arg new "${new}" \
+    'with_entries(if .key == $old then .key = $new else . end)' 2>/dev/null ||
+    assertError
+}
+
+rearrangeLists() {
+  local pipeSelectedList
+  read -r pipeSelectedList < <(makeFIFO) || exit 1
+  selectList "${ALL_KEYS}" "${MENU_NAV} Reposition..." >"${pipeSelectedList}" &
+
+  local selectedList
+  read -r selectedList <"${pipeSelectedList}" || return 2
+
+  local pipePosition
+  read -r pipePosition < <(makeFIFO) || exit 1
+
+  assertSelection "
+    Reposition '${selectedList}' list...
+    To top
+    To bottom
+    Above a list...
+    Below a list...
+  " --header-lines 1 >"${pipePosition}" &
+
+  local position
+  read -r position < <(awk '{print tolower($0)}' "${pipePosition}") || return 1
+
+  if [[ ! ${position} =~ ('to top'|'to bottom') ]]; then
+    local pipePositionFromList
+    read -r pipePositionFromList < <(makeFIFO) || exit 1
+    selectList "${ALL_KEYS}" "Move it ${position%' a list...'}..." \
+      "${selectedList}" >"${pipePositionFromList}" &
+
+    local positionFromList
+    read -r positionFromList <"${pipePositionFromList}" || return 1
+
+    local pipeTargetIndex
+    read -r pipeTargetIndex < <(makeFIFO) || exit 1
+    jq -c \
+      --arg selectedList "${selectedList}" \
+      --arg targetList "${positionFromList}" \
+      '.-=[$selectedList] | index($targetList)' <<<"${ALL_KEYS}" \
+      >"${pipeTargetIndex}" &
+
+    local targetIndex
+    read -r targetIndex <"${pipeTargetIndex}"
+  fi
+
+  newArrangement() {
+    local selectedList=$1
+    local index=$2
+
+    jq -c \
+      --arg list "${selectedList}" \
+      --argjson index "${index}" \
+      '.-=[$list] | [.[0:$index][], $list, .[$index:][]]' <<<"${ALL_KEYS}"
+  }
+
+  local newOrder
+  local index
+  if [[ ${position} == 'to top' ]]; then
+    read -r newOrder < <(newArrangement "${selectedList}" '0')
+
+  elif [[ ${position} == 'to bottom' ]]; then
+    index=$((ALL_KEYS_COUNT - 1))
+    read -r newOrder < <(newArrangement "${selectedList}" "${index}")
+
+  elif [[ ${position} == 'above a list...' ]]; then
+    index=${targetIndex}
+    read -r newOrder < <(newArrangement "${selectedList}" "${index}")
+
+  elif [[ ${position} == 'below a list...' ]]; then
+    index=$((targetIndex + 1))
+    read -r newOrder < <(newArrangement "${selectedList}" "${index}")
+  fi
+
+  if [[ ! ${newOrder} ]]; then
+    assertError 'unable to reposition list!'
+    exit 1
+  elif [[ ${newOrder} == "${ALL_KEYS}" ]]; then
+    assertMissing 'No changes were made!'
+    exit
+  else
+
+    backupList
+
+    jq --argjson keys "${newOrder}" \
+      '. as $list | reduce $keys[] as $key ({}; .[$key] = $list[$key])' \
+      <<<"${JSON}" >"${LIST_JSON}" 2>/dev/null &
+
+    local pid=$!
+    waitingFor 'jq to rebuild list file' "${pid}"
+    if wait "${pid}"; then
+      assertSuccess 'List file was rebuilt'
+      assertSuccess 'List path:' "${LIST_JSON/#$HOME/\~}"
+      exit
+    else
+      assertError
+      exit 1
+    fi
+  fi
+}
+
+manageLists() {
+  local count
+  read -r count < <(jq 'length' <<<"${ACTIVE_KEYS}")
+  if [[ ${count} -eq 1 ]]; then
+    grep -qxF 'archive' <(jq -r '.[]' <<<"${ACTIVE_KEYS}") 2>/dev/null ||
+      local toArchive='Move Series to Archive'
+    grep -qxF 'watching' <(jq -r '.[]' <<<"${ACTIVE_KEYS}") 2>/dev/null ||
+      local deleteAList='Delete a List'
+  else
+    local toArchive='Move Series to Archive'
+    local deleteAList='Delete a List'
+  fi
+
+  if [[ ${ALL_KEYS_COUNT} -gt 1 ]]; then
+    local between='Move Series Between Lists'
+    local arrange='Rearrange Lists'
+  fi
+
+  local selectedAction
+  read -r selectedAction < <(makeFIFO) || exit 1
+
+  assertSelection "
+    ${MENU_NAV} Manage Lists
+    ${toArchive}
+    ${between}
+    Delete Series From a List
+    ${deleteAList}
+    ${arrange}
+  " --header-lines 1 --no-select-1 >"${selectedAction}" &
+
+  local action
+  read -r action <"${selectedAction}" || return 2
+
+  if [[ ${action} == 'Move Series to Archive' ]]; then
+    navMenu moveToList '' 'archive' || return 1
+
+  elif [[ ${action} == 'Move Series Between Lists' ]]; then
+    navMenu moveToList || return 1
+
+  elif [[ ${action} == 'Delete Series From a List' ]]; then
+    navMenu moveToList '' 'delete' || return 1
+
+  elif [[ ${action} == 'Delete a List' ]]; then
+    navMenu deleteList || return 1
+
+  elif [[ ${action} == 'Rearrange Lists' ]]; then
+    navMenu rearrangeLists || return 1
+  fi
+
+  exit
+}
+
+listKeys() {
+  jq -cr 'keys_unsorted' 2>/dev/null || assertError
+}
+
+removeEmptyLists() {
+  jq -c '
+    walk(if type=="object" then with_entries(select(.value!=[])) else . end)
+  ' 2>/dev/null || assertError
+}
+
+browseList() {
+  local keys=$1
+  sed "s/\b\(.\)/\u\1/g;s/$/ List/" <(jq -r '.[]' <<<"${keys}")
+}
+
+browse() {
+  local pipeSelectedList
+  read -r pipeSelectedList < <(makeFIFO) || exit 1
+  selectList "${ACTIVE_KEYS}" "${MENU_NAV} Browse..." >"${pipeSelectedList}" &
+  local selectedList
+  read -r selectedList <"${pipeSelectedList}" || return 2
+
+  selectFromList "${selectedList}" || return 1
+}
+
+configProcessOptions() {
+  local header="${MENU_NAV} Process config of a series from..."
+  local pipeSelectedList
+  read -r pipeSelectedList < <(makeFIFO) || exit 1
+  selectList "${ACTIVE_KEYS}" "${header}" >"${pipeSelectedList}" &
+
+  local selectedList
+  read -r selectedList <"${pipeSelectedList}" || return 2
+  selectFromList "${selectedList}" || return 1
+
+  until processConfig 'Cancel'; do assertNav; done
+  exit
+}
+
+navigate() {
+  local pipeMenu
+  read -r pipeMenu < <(makeFIFO) || exit 1
+
+  assertSelection "
+    ${MENU_TOP} Main Menu
+    Browse Lists
+    Manage Lists
+    Manage Configurations
+  " --header-lines 1 >"${pipeMenu}" &
+
+  if ! read -r menu <"${pipeMenu}"; then
+    assertMissing 'Exiting...'
+    exit
+  fi
+
+  if [[ ${menu} == 'Browse Lists' ]]; then
+    navMenu browse || return 1
+    until processConfig; do assertNav; done
+    downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
+
+  elif [[ ${menu} == 'Manage Lists' ]]; then
+    navMenu manageLists || return 1
+
+  else
+    navMenu configProcessOptions || return 1
+  fi
+}
+
+processExtractorEntry() {
+  local extractorEntry
+  read -r extractorEntry < <(
+    head -n 1 <(grep -iF "${EXTRACTOR_ENTRY}" <(yt-dlp --list-extractors))
+  )
+
+  if ! [[ ${extractorEntry} ]]; then
+    assertMissing 'Extractor was not found in yt-dlp list!'
+    exit 1
+  fi
+
   assertSuccess 'Extractor entry:' "${extractorEntry}"
 
-  if [[ -f ${EXTRACTOR_CONFIG} ]]; then
-    assertSuccess 'Extractor config:' "${EXTRACTOR_CONFIG/#$HOME/\~}\n"
+  local extractor
+  read -r extractor < <(safeFilename <<<"${extractorEntry%\:*}")
+  local extractorConfFile=${EXTRACTORS_CONFIG_DIR}/${extractor}.conf
+
+  if [[ -f ${extractorConfFile} ]]; then
+    readonly EXTRACTOR_CONFIG=${extractorConfFile}
+    assertSuccess 'Extractor config:' "${EXTRACTOR_CONFIG/#$HOME/\~}"
   else
-    assertMissing 'Extractor config not found:' \
-      "${EXTRACTOR_CONFIG/#$HOME/\~}\n"
-    unset EXTRACTOR_CONFIG
+    assertMissing 'Extractor config was not found:' \
+      "${extractorConfFile/#$HOME/\~}"
   fi
 }
 
 validateOptionValue() {
   if [[ $2 =~ ^'-' ]]; then
-    assertError "invalid value '$2' for option '$1'." \
+    assertMissing "Invalid value '$2' for option '$1'." \
       "Do not use a value that begins with '-'."
     exit 1
   fi
 }
 
 #* --{ Main workflow }-- *#
-while [[ $1 ]]; do
+while [[ $# -gt 0 ]]; do
   case "$1" in
   st | stream)
-    if [[ ! ${SUB_COMMAND} ]]; then
-      readonly SUB_COMMAND='Stream'
-    else
-      assertError 'subcommand conflict!' \
+    if [[ ${SUB_COMMAND} ]]; then
+      assertMissing 'Subcommand conflict!' \
         'Pass either stream (st) or download (dl) as a subcommand.'
       exit 1
     fi
+    # readonly SUB_COMMAND='Stream'
+    SUB_COMMAND='Stream'
     ;;
 
   dl | download)
-    if [[ ! ${SUB_COMMAND} ]]; then
-      readonly SUB_COMMAND='Download'
-    else
-      assertError 'subcommand conflict!' \
+    if [[ ${SUB_COMMAND} ]]; then
+      assertMissing 'Subcommand conflict!' \
         'Pass either stream (st) or download (dl) as a subcommand.'
       exit 1
     fi
+    # readonly SUB_COMMAND='Download'
+    SUB_COMMAND='Download'
     ;;
 
   -e | --extractor)
     validateOptionValue "$1" "$2"
-    readonly EXTRACTOR_ENTRY=$2
+    # readonly EXTRACTOR_ENTRY=$2
+    EXTRACTOR_ENTRY=$2
     shift
     ;;
 
   --no-delete)
-    readonly DELETE_FRAG=0
+    DELETE_FRAG=0
+    ;;
+
+  --delete-frag)
+    DELETE_FRAG=1
     ;;
 
   --here)
-    readonly DOWNLOAD_DIR=
+    unset -v DOWNLOAD_DIR
     ;;
 
   --no-sub-dir)
-    readonly MAKE_SUB_DIR=0
+    MAKE_SUB_DIR=0
+    ;;
+
+  --base-dir)
+    validateOptionValue "$1" "$2"
+    DOWNLOAD_DIR=$2
+    shift
+    ;;
+
+  --dir)
+    validateOptionValue "$1" "$2"
+    DOWNLOAD_DIR=$2
+    MAKE_SUB_DIR=0
+    shift
     ;;
 
   --no-iso-sub)
-    readonly ISO_SUB=0
+    ISO_SUB=0
+    BATCH_ISO_SUB=0
+    ;;
+
+  --batch-iso-sub)
+    ISO_SUB=1
+    BATCH_ISO_SUB=1
     ;;
 
   --ytd-series)
-    readonly YTD_SERIES=1
+    # readonly YTD_SERIES=1
+    YTD_SERIES=1
+    ;;
+
+  --series)
+    validateOptionValue "$1" "$2"
+    read -r SERIES < <(safeFilename <<<"$2")
+    readonly SERIES
+    shift
     ;;
 
   --season-template)
-    if [[ $2 =~ ([Ss]ingle|[Mm]ulti|[Cc]ustom) ]]; then
-      readonly DEFAULT_SEASON_NO=$2
-      shift
-    else
+    if [[ ! $2 =~ ([Ss]ingle|[Mm]ulti|[Cc]ustom) ]]; then
       assertError 'invalid season-template value!' \
         'Valid values: single, multi, or custom.'
       exit 1
     fi
+    # readonly DEFAULT_SEASON_NO=$2
+    DEFAULT_SEASON_NO=$2
+    shift
     ;;
 
   --parse-index)
-    if readonly PARSE_INDEX_START=$(isPositiveInteger "$2"); then
-      shift
-    else
+    if ! read -r PARSE_INDEX_START < <(isPositiveInteger "$2"); then
       assertError 'invalid parse-index value!' \
         'It must be an integer number that is greater than 0.'
       exit 1
     fi
+    # readonly PARSE_INDEX_START
+    shift
     ;;
 
   --)
     ARGS=("${@:2}")
+    unset -v index
     for index in "${!ARGS[@]}"; do
-      [[ ${ARGS[${index}]} ]] || unset "ARGS[${index}]"
+      [[ ${ARGS[${index}]} ]] || unset -v "ARGS[${index}]"
       if [[ ${ARGS[${index}]} == '--download-archive' ]]; then
-        readonly ARCHIVE_PATH=${ARGS[${index} + 1]}
-        unset "ARGS[${index}]"
-        unset "ARGS[${index} + 1]"
+        # readonly ARCHIVE_PATH=${ARGS[${index} + 1]}
+        ARCHIVE_PATH=${ARGS[${index} + 1]}
+        unset -v "ARGS[${index}]"
+        unset -v "ARGS[${index} + 1]"
       elif [[ ${ARGS[${index}]} == '--autonumber-start' ]]; then
-        if ! AUTONUMBER=$(isPositiveInteger "${ARGS[${index} + 1]}"); then
+        if ! read -r AUTONUMBER < <(
+          isPositiveInteger "${ARGS[${index} + 1]}"
+        ); then
           assertError 'invalid autonumber-start value!' \
-            'It must be an integer number that is greater than 0.'
+            'It must be an integer that is greater than 0.'
           exit 1
         fi
-        readonly AUTONUMBER
-        unset "ARGS[${index}]"
-        unset "ARGS[${index} + 1]"
+        # readonly -a AUTONUMBER
+        unset -v "ARGS[${index}]"
+        unset -v "ARGS[${index} + 1]"
+      elif [[ ${ARGS[${index}]} == '--format' ]]; then
+        # readonly FORMAT=${ARGS[${index} + 1]}
+        FORMAT=${ARGS[${index} + 1]}
+        unset -v "ARGS[${index}]"
+        unset -v "ARGS[${index} + 1]"
+      # elif [[ ${ARGS[${index}]} == '--exec' ]]; then
+      #   readonly EXEC=${ARGS[${index} + 1]}
+      #   unset -v "ARGS[${index}]"
+      #   unset -v "ARGS[${index} + 1]"
       fi
+      shift
     done
-    readonly ARGS
+    unset -v index
+    readonly -a ARGS
     shift
     break
     ;;
 
   *)
     if [[ $1 =~ https?://.* ]]; then
-      readonly SERIES_URL=$1
-    else
-      assertError 'invalid option:' "$1"
+      if [[ ! ${SERIES_URL} ]]; then
+        readonly SERIES_URL=$1
+      else
+        assertMissing 'Only one URL is supported!' \
+          'Additional URLs will be ignored!'
+      fi
+    elif [[ $1 ]]; then
+      assertMissing 'Invalid option:' "$1"
       exit 1
     fi
     ;;
@@ -1813,12 +2429,60 @@ while [[ $1 ]]; do
   shift
 done
 
+readonly FORMAT
+readonly -a AUTONUMBER
+readonly ARCHIVE_PATH
+readonly PARSE_INDEX_START
+readonly DEFAULT_SEASON_NO
+readonly YTD_SERIES
+readonly EXTRACTOR_ENTRY
+readonly SUB_COMMAND
+#
+readonly DELETE_FRAG
+readonly DOWNLOAD_DIR
+readonly MAKE_SUB_DIR
+readonly ISO_SUB
+readonly BATCH_ISO_SUB
+
+# if [[ ! -t 0 ]]; then
+#   if [[ ${SERIES_URL} ]]; then
+#     cat &>/dev/null
+#     assertMissing 'URL was already provided as an argument!' \
+#       'STDIN will be ignored!'
+#   else
+#
+#     unset -v url
+#     while IFS= read -r url; do
+#       if [[ ! ${SERIES_URL} ]]; then
+#         if [[ ${url} =~ https?://.* ]]; then
+#           readonly SERIES_URL=${url}
+#
+#         elif [[ ${SERIES_URL} ]]; then
+#           assertMissing 'Invalid URL:' "$1"
+#           exit 1
+#
+#         else
+#           assertError
+#           exit 1
+#         fi
+#
+#       else
+#         # cat &>/dev/null
+#         assertMissing 'Only one URL is supported!' \
+#           'Additional URLs will be ignored!'
+#         break
+#       fi
+#     done
+#     unset -v url
+#   fi
+# fi
+
 [[ ${DOWNLOAD_DIR} ]] && if [[ ! -d ${DOWNLOAD_DIR} ]]; then
-  assertMissing 'Clanime Downloads directory:' "${DOWNLOAD_DIR}"
-  assertError 'Clanime Downloads directory not found'
+  assertMissing 'Clanime Downloads directory was not found:'
+  echo "${DOWNLOAD_DIR}"
   exit 1
 elif [[ ! -w ${DOWNLOAD_DIR} ]]; then
-  assertError 'you do not have permission to write files in the configured ' \
+  assertMissing 'You do not have permission to write files in the configured' \
     'Clanime Downloads directory.'
   exit 1
 fi
@@ -1826,7 +2490,7 @@ fi
 if [[ ! -d ${CONFIG_DIR} ]]; then
   assertTask 'Creating config directory...'
   if ! mkdir -p "${CONFIG_DIR}" 2>/dev/null; then
-    assertError 'could not create config directory:' "${CONFIG_DIR}"
+    assertError 'unable to create config directory:' "${CONFIG_DIR}"
     exit 1
   fi
   assertSuccess 'Config directory:' "${CONFIG_DIR}\n"
@@ -1835,75 +2499,70 @@ fi
 if [[ ! -d ${CACHE_DIR} ]]; then
   assertTask "Creating cache directory..."
   if ! mkdir -p "${CACHE_DIR}" 2>/dev/null; then
-    assertError 'could not create cache directory:' "${CACHE_DIR}"
+    assertError 'unable to create cache directory:' "${CACHE_DIR}"
     exit 1
   fi
   assertSuccess 'Cache directory:' "${CACHE_DIR}\n"
 fi
 
-if [[ ${SERIES_URL} ]]; then
-  readonly MAIN="${SERIES_URL}"
-  [[ ${EXTRACTOR_ENTRY} ]] && processExtractorEntry
+if [[ -s "${LIST_JSON}" ]]; then
+  read -r JSON < <(jq -c <"${LIST_JSON}" 2>/dev/null) || assertError || exit 1
+  readonly JSON
+  read -r ALL_KEYS < <(listKeys <<<"${JSON}")
+  readonly ALL_KEYS
+  read -r ACTIVE_KEYS < <(listKeys < <(removeEmptyLists <<<"${JSON}"))
+  readonly ACTIVE_KEYS
+  read -r ALL_KEYS_COUNT < <(jq 'length' <<<"${ALL_KEYS}")
+  readonly ALL_KEYS_COUNT
 
-elif [[ ! -s ${LIST_JSON} ]]; then
-  assertMissing 'Nothing is stored in your local list, yet!' \
-    'Provide at least one URL.'
-
-else
-  if ! jq -c 'keys[]' "${LIST_JSON}" &>/dev/null; then
-    assertError 'list is corrupted!' 'Try to recover it from list backup.'
-    exit 1
+  if [[ ! ${ALL_KEYS} || ${ALL_KEYS} == '[]' ]]; then
+    assertMissing 'Invalid list file!'
+    echo
+    assertTask 'Deleting invalid list file...'
+    if rm -- "${LIST_JSON}" 2>/dev/null; then
+      assertSuccess 'File was deleted:' "${LIST_JSON/#$HOME/\~}"
+      assertTip 'try to recover it from a backup.' \
+        'Or add a new series to watching list.'
+      exit 1
+    else
+      assertError 'unable to delete invalid list file!'
+      exit 1
+    fi
   fi
-
-  assertTask 'Awaiting user selection from main options...'
-  readonly MAIN=$(
-    assertSelection "
-      $(browseList)
-      Process Configurations
-      Delete Series From a List
-      Move Series Between Lists
-      Move Series to Archive
-    "
-  )
 fi
 
-if [[ ! ${MAIN} ]]; then
-  assertMissing 'Aborted!'
-  exit
-elif ! TMP_DIR=$(mktemp -qd "${TMP_DIR_PREFIX}"); then
-  assertError 'could not create temporary directory!'
+read -r TMP_DIR < <(mktemp -qd "${TMP_DIR_PREFIX}")
+readonly TMP_DIR
+if ! [[ -d ${TMP_DIR} ]]; then
+  assertError 'unable to create temporary directory!'
   exit 1
 fi
 
-readonly TMP_DIR
 trap 'cleanup' EXIT
 trap 'cleanup HUP' HUP
 trap 'cleanup TERM' TERM
 trap 'cleanup INT' INT
 
 if [[ ${SERIES_URL} ]]; then
+  [[ ${EXTRACTOR_ENTRY} ]] && processExtractorEntry
   preSelectedSeries
   addToWatchList
-  processConfig
+  until processConfig; do assertNav; done
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
 
-elif [[ ${MAIN} == 'Delete Series From a List' ]]; then
-  moveToList '' 'delete'
-
-elif [[ ${MAIN} == 'Move Series Between Lists' ]]; then
-  moveToList
-
-elif [[ ${MAIN} == 'Move Series to Archive' ]]; then
-  moveToList '' 'archive'
-
-elif [[ ${MAIN} != 'Process'* ]]; then
-  assertSuccess "Browse: ${MAIN}\n"
-  browse "${MAIN%' List'}"
-  processConfig
-  downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
+elif [[ ! -s ${LIST_JSON} ]]; then
+  assertMissing 'Nothing is stored in your local list, yet!' \
+    'Provide series URL to add it to your list.'
+  exit
 
 else
-  configProcessOptions
+  if [[ ${ACTIVE_KEYS} == '[]' ]]; then
+    assertMissing 'Nothing is stored in your local list, yet!' \
+      'Provide series URL to add it to your list.'
+    exit
+  fi
+
+  until navigate; do assertNav; done
 fi
 
 exit
