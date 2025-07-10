@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2317  # Functions called indirectly via traps and nav
 
 echo -ne 'Loading... \r'
 
@@ -80,6 +81,9 @@ BATCH_ISO_SUB=${CLANIME_BATCH_ISO_SUB:-0}
 
 # Automatically delete fragmented files (default: on)
 DELETE_FRAG=${CLANIME_DELETE_FRAG:-1}
+
+# Non-interactive mode for automation (default: off)
+NON_INTERACTIVE=${CLANIME_NON_INTERACTIVE:-0}
 
 #* End of Settings *#
 
@@ -936,7 +940,7 @@ preSelectedSeries() {
   local json
   local config
   read -r json < <(makeTEMP 'json') || exit 1
-  read -r config < <(makeTEMP 'json') || exit 1
+  read -r config < <(makeTEMP 'config') || exit 1
   cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" 2>/dev/null >"${config}"
 
   # --config-location <(
@@ -988,6 +992,7 @@ preSelectedSeries() {
         if ! read -r series < <(jq -cr '.title' <"${json}" 2>/dev/null) ||
           [[ ${series} == 'null' ]]; then
           assertMissing 'Title name was not found!'
+          assertTip 'Use [--series NAME] option to specify a series name.'
           exit 1
         fi
       fi
@@ -1110,6 +1115,22 @@ processConfig() {
   fi
 }
 
+# TODO: Repurpose this function to handle --series-config flag for custom
+# config file paths
+#
+# processConfigNonInteractive() {
+#   if compgen -G "${CONFIG_DIR}/${SERIES}*" >/dev/null; then
+#     # Use first existing config file
+#     local configFile
+#     read -r configFile < <(find "${CONFIG_DIR}/${SERIES}"*.conf | head -n 1)
+#     readonly SERIES_CONFIG="${configFile}"
+#     assertSuccess "Using existing config: ${configFile/#$HOME/\~}"
+#   else
+#     # Create minimal config automatically
+#     createMinimalConfig
+#   fi
+# }
+
 stream() {
   echo
   assertTask 'Processing stream with MPV...'
@@ -1224,13 +1245,17 @@ processFragmentedDownload() {
   fi
 
   local filesToDelete
-  if [[ ${DELETE_FRAG} -ne 0 ]]; then
+  if [[ ${DELETE_FRAG} -eq 1 ]]; then
     filesToDelete=${fragmentedFiles}
   else
-    local header='Select one or more files to delete:'
-    read -r filesToDelete < <(
-      fzf -m --no-select-1 --header "${header}" <<<"${fragmentedFiles}"
-    )
+    if [[ ${NON_INTERACTIVE} -ne 1 ]]; then
+      # In non-interactive mode with DELETE_FRAG=0,
+      # respect user choice (delete nothing)
+      local header='Select one or more files to delete:'
+      read -r filesToDelete < <(
+        fzf -m --no-select-1 --header "${header}" <<<"${fragmentedFiles}"
+      )
+    fi
   fi
 
   if [[ ${filesToDelete} ]]; then
@@ -1255,20 +1280,22 @@ processFragmentedDownload() {
 
     local deleteFragmentedFiles
     if [[ ${DELETE_FRAG} -eq 0 ]]; then
-      local pipeDeleteFrag
-      read -r pipeDeleteFrag < <(makeFIFO) || exit 1
+      if [[ ${NON_INTERACTIVE} -ne 1 ]]; then
+        local pipeDeleteFrag
+        read -r pipeDeleteFrag < <(makeFIFO) || exit 1
 
-      assertSelection "
-        ${RED_BOLD_TXT}${filesToDelete}${RESET}
-        Delete listed file${pluralFile} from disk!
-        Cancel (esc)
-      " --header-lines "${filesCount}" >"${pipeDeleteFrag}" &
+        assertSelection "
+          ${RED_BOLD_TXT}${filesToDelete}${RESET}
+          Delete listed file${pluralFile} from disk!
+          Cancel (esc)
+        " --header-lines "${filesCount}" >"${pipeDeleteFrag}" &
 
-      read -r deleteFragmentedFiles <"${pipeDeleteFrag}"
+        read -r deleteFragmentedFiles <"${pipeDeleteFrag}"
+      fi
     fi
 
     local file
-    if [[ ${deleteFragmentedFiles} == 'Delete'* || ${DELETE_FRAG} -ne 0 ]]; then
+    if [[ ${deleteFragmentedFiles} == 'Delete'* || ${DELETE_FRAG} -eq 1 ]]; then
       while IFS= read -r file; do
         rm -f -- "${PWD}/${file}" 2>/dev/null
 
@@ -2373,6 +2400,10 @@ while [[ $# -gt 0 ]]; do
     shift
     ;;
 
+  --non-interactive | -y)
+    NON_INTERACTIVE=1
+    ;;
+
   --)
     ARGS=("${@:2}")
     unset -v index
@@ -2544,17 +2575,25 @@ trap 'cleanup HUP' HUP
 trap 'cleanup TERM' TERM
 trap 'cleanup INT' INT
 
-if [[ ${SERIES_URL} ]]; then
+if [[ ${NON_INTERACTIVE} -eq 1 && ${SERIES_URL} ]]; then
   [[ ${EXTRACTOR_ENTRY} ]] && processExtractorEntry
   preSelectedSeries
+  downloadOrStream "${SUB_COMMAND:-Download}" "${ARGS[@]}"
+elif [[ ${NON_INTERACTIVE} -eq 1 && ! ${SERIES_URL} ]]; then
+  assertMissing 'You must provide series URL when running in' \
+    'non-interactive mode!'
+elif [[ ${SERIES_URL} ]]; then
+  [[ ${EXTRACTOR_ENTRY} ]] && processExtractorEntry
+  preSelectedSeries
+
   addToWatchList
   until processConfig; do assertNav; done
+
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
 
 elif [[ ! -s ${LIST_JSON} ]]; then
   assertMissing 'Nothing is stored in your local list, yet!' \
     'Provide series URL to add it to your list.'
-  exit
 
 else
   if [[ ${ACTIVE_KEYS} == '[]' ]]; then
