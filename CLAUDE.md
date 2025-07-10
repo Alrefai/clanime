@@ -103,6 +103,11 @@ Environment variables control behavior:
 3. **Shellcheck**: Code includes shellcheck directives; always run `shellcheck clanime.sh` before committing
 4. **Git Branch Strategy**: Feature branches merge to `develop`, not `main`
 5. **Commit Style**: Use conventional commits with emojis (feat: 🎸, fix: 🐛, perf: ⚡️, refactor: 💡)
+6. **GitHub Workflow**: 
+   - **Issues**: High-level status updates, requirements, planning, milestone updates
+   - **PRs**: Technical implementation details, code review, commit-specific changes
+   - **Cross-reference**: Issues link to PRs for technical details, avoid duplicating content
+   - **Comments**: Keep issue comments brief and strategic, detailed technical discussion in PRs
 
 ## Common Tasks
 

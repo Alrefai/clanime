@@ -1,10 +1,10 @@
 # clanime
 
-A powerful command-line interface for managing, downloading, and streaming anime/video series using yt-dlp.
+A powerful command-line interface for managing, downloading, and streaming video series using yt-dlp.
 
 ## Features
 
-- 📺 **Stream or Download** anime series with a single command
+- 📺 **Stream or Download** video series with a single command
 - 🤖 **Non-Interactive Mode** for automation, scripting, and CI/CD
 - 📋 **Interactive Series Management** with local watchlist storage
 - 🎯 **Smart Navigation** using fzf for fuzzy searching and selection
@@ -94,31 +94,34 @@ clanime
 
 ```bash
 # Stream with specific quality
-clanime stream "https://example.com/anime" -- --format "best[height<=720]"
+clanime stream "https://example.com/series" -- --format "best[height<=720]"
 
 # Download to specific directory
-clanime download "https://example.com/anime" --base-dir ~/Downloads/Anime
+clanime download "https://example.com/series" --base-dir ~/Downloads/Series
 
 # Use custom series name and season template
-clanime dl "https://example.com/anime" --series "My Anime" --season-template multi
+clanime dl "https://example.com/series" --series "My Series" --season-template multi
 
 # Download with archive tracking
-clanime download "https://example.com/anime" -- --download-archive downloaded.txt
+clanime download "https://example.com/series" -- --download-archive downloaded.txt
 ```
 
 ### Non-Interactive Mode
 
-Perfect for automation, scripting, and CI/CD pipelines. Bypasses all prompts and uses sensible defaults.
+Perfect for automation, scripting, and CI/CD pipelines. Uses a streamlined execution path that bypasses watchlist and config management.
 
 ```bash
-# Basic non-interactive download
-clanime download "https://youtube.com/playlist?list=..." --non-interactive --series "Anime Name"
+# Basic non-interactive download (defaults to download if no sub-command specified)
+clanime --non-interactive "https://youtube.com/playlist?list=..." --series "Series Name"
+
+# Explicit download sub-command
+clanime download "https://youtube.com/playlist?list=..." --non-interactive --series "Series Name"
 
 # Short flag with custom directory and format
-clanime download "https://example.com/anime" -y --series "My Anime" --dir ~/Downloads --format "best[height<=720]"
+clanime download "https://example.com/series" -y --series "My Series" --dir ~/Downloads --format "best[height<=720]"
 
 # Non-interactive streaming
-clanime stream "https://example.com/anime" --non-interactive
+clanime stream "https://example.com/series" --non-interactive
 
 # Automation example with error handling
 if clanime download "$URL" -y --series "$SERIES_NAME" --dir "$DOWNLOAD_DIR"; then
@@ -130,10 +133,10 @@ fi
 
 **Features:**
 - 🚫 **No Prompts** - Completely silent operation
-- ⚙️ **Auto-Config** - Generates minimal configuration automatically
-- 📁 **Smart Naming** - Uses reliable template: "Series - 01 - Video Title.ext"
-- 🔄 **Auto-Archive** - Automatically handles fragmented files
-- 📋 **Watch List** - Auto-adds series to local watch list
+- ⚡ **Streamlined** - Bypasses watchlist and config management for direct execution
+- 📁 **Smart Defaults** - Uses sensible fallbacks (defaults to download mode)
+- 🔄 **Auto-Cleanup** - Automatically handles fragmented files
+- 🛡️ **Error Handling** - Clear error messages for automation debugging
 
 ## Configuration
 
@@ -216,11 +219,11 @@ Enable debug mode for troubleshooting:
 ```bash
 # Basic debug (enhanced error messages with line numbers)
 export CLANIME_DEBUG=1
-clanime stream "https://example.com/anime"
+clanime stream "https://example.com/series"
 
 # Verbose debug (full bash trace)
 export CLANIME_DEBUG=2
-clanime stream "https://example.com/anime"
+clanime stream "https://example.com/series"
 ```
 
 ## File Locations
@@ -259,7 +262,8 @@ Debug information includes:
 
 ## Development
 
-See [CLAUDE.md](CLAUDE.md) for development setup and [STYLE_GUIDE.md](STYLE_GUIDE.md) for coding conventions.
+See [STYLE_GUIDE.md](STYLE_GUIDE.md) for coding conventions.
+
 
 ### Contributing
 

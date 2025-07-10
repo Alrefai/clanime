@@ -204,7 +204,7 @@ CLANIME_DEBUG=2 ./clanime.sh
 - Use clear, descriptive function names that indicate purpose
 
 ### 9.2 Configuration Documentation
-- All environment variables should be documented in CLAUDE.md
+- All environment variables should be documented in README.md
 - Include default values and expected formats
 - Group related configuration options together
 
