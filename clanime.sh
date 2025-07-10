@@ -940,7 +940,7 @@ preSelectedSeries() {
   local json
   local config
   read -r json < <(makeTEMP 'json') || exit 1
-  read -r config < <(makeTEMP 'json') || exit 1
+  read -r config < <(makeTEMP 'config') || exit 1
   cat "${USER_CONFIG}" "${EXTRACTOR_CONFIG}" 2>/dev/null >"${config}"
 
   # --config-location <(
@@ -992,6 +992,7 @@ preSelectedSeries() {
         if ! read -r series < <(jq -cr '.title' <"${json}" 2>/dev/null) ||
           [[ ${series} == 'null' ]]; then
           assertMissing 'Title name was not found!'
+          assertTip 'Use [--series NAME] option to specify a series name.'
           exit 1
         fi
       fi
@@ -1071,38 +1072,6 @@ addToWatchList() {
   fi
 }
 
-addToWatchListNonInteractive() {
-  [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
-  [[ ${SERIES} ]] || assertError || exit 1
-
-  local pipeTitles
-  read -r pipeTitles < <(makeFIFO) || exit 1
-  jq -r '.[][]?.title' 2>/dev/null <<<"${JSON}" >"${pipeTitles}" &
-
-  if ! grep -qxF "${SERIES}" "${pipeTitles}" 2>/dev/null; then
-    # Auto-add to watching list without prompting
-    jq \
-      --arg url "${SERIES_URL}" \
-      --arg title "${SERIES}" \
-      --arg extractor "${EXTRACTOR}" \
-      '.watching += [{ $url, $title, $extractor }]' <<<"${JSON}" \
-      >"${LIST_JSON}" 2>/dev/null || assertError || exit 1
-
-    assertSuccess "Series was added to 'watching' list (non-interactive)"
-  else
-    local pipeList
-    read -r pipeList < <(makeFIFO) || exit 1
-
-    jq -cr --arg title "${SERIES}" \
-      'keys[] as $list | select(.[$list][].title==$title) | $list' \
-      <<<"${JSON}" >"${pipeList}" 2>/dev/null &
-
-    local list
-    read -r list <"${pipeList}" || assertError || exit 1
-    assertSuccess "Series was found in '${list}' list (non-interactive)"
-  fi
-}
-
 processConfig() {
   local escape=$1
 
@@ -1146,40 +1115,21 @@ processConfig() {
   fi
 }
 
-createMinimalConfig() {
-  local configFile="${CONFIG_DIR}/${SERIES}.conf"
-  
-  # Create config directory if it doesn't exist
-  if ! mkdir -p "${CONFIG_DIR}" 2>/dev/null; then
-    assertError 'unable to create config directory'
-    exit 1
-  fi
-  
-  # Use environment variable or sensible default for format
-  local defaultFormat="${CLANIME_NON_INTERACTIVE_FORMAT:-best}"
-  
-  # Create minimal config with basic settings
-  cat > "${configFile}" << EOF
---format ${defaultFormat}
--o "${SERIES} - %(playlist_index)02d - %(title)s.%(ext)s"
-EOF
-  
-  readonly SERIES_CONFIG="${configFile}"
-  assertSuccess "Auto-generated config: ${configFile/#$HOME/\~}"
-}
-
-processConfigNonInteractive() {
-  if compgen -G "${CONFIG_DIR}/${SERIES}*" >/dev/null; then
-    # Use first existing config file
-    local configFile
-    read -r configFile < <(find "${CONFIG_DIR}/${SERIES}"*.conf | head -n 1)
-    readonly SERIES_CONFIG="${configFile}"
-    assertSuccess "Using existing config: ${configFile/#$HOME/\~}"
-  else
-    # Create minimal config automatically
-    createMinimalConfig
-  fi
-}
+# TODO: Repurpose this function to handle --series-config flag for custom
+# config file paths
+#
+# processConfigNonInteractive() {
+#   if compgen -G "${CONFIG_DIR}/${SERIES}*" >/dev/null; then
+#     # Use first existing config file
+#     local configFile
+#     read -r configFile < <(find "${CONFIG_DIR}/${SERIES}"*.conf | head -n 1)
+#     readonly SERIES_CONFIG="${configFile}"
+#     assertSuccess "Using existing config: ${configFile/#$HOME/\~}"
+#   else
+#     # Create minimal config automatically
+#     createMinimalConfig
+#   fi
+# }
 
 stream() {
   echo
@@ -2625,24 +2575,25 @@ trap 'cleanup HUP' HUP
 trap 'cleanup TERM' TERM
 trap 'cleanup INT' INT
 
-if [[ ${SERIES_URL} ]]; then
+if [[ ${NON_INTERACTIVE} -eq 1 && ${SERIES_URL} ]]; then
   [[ ${EXTRACTOR_ENTRY} ]] && processExtractorEntry
   preSelectedSeries
-  
-  if [[ ${NON_INTERACTIVE} -eq 1 ]]; then
-    addToWatchListNonInteractive
-    processConfigNonInteractive
-  else
-    addToWatchList
-    until processConfig; do assertNav; done
-  fi
-  
+  downloadOrStream "${SUB_COMMAND:-Download}" "${ARGS[@]}"
+elif [[ ${NON_INTERACTIVE} -eq 1 && ! ${SERIES_URL} ]]; then
+  assertMissing 'You must provide series URL when running in' \
+    'non-interactive mode!'
+elif [[ ${SERIES_URL} ]]; then
+  [[ ${EXTRACTOR_ENTRY} ]] && processExtractorEntry
+  preSelectedSeries
+
+  addToWatchList
+  until processConfig; do assertNav; done
+
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
 
 elif [[ ! -s ${LIST_JSON} ]]; then
   assertMissing 'Nothing is stored in your local list, yet!' \
     'Provide series URL to add it to your list.'
-  exit
 
 else
   if [[ ${ACTIVE_KEYS} == '[]' ]]; then
