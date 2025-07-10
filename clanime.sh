@@ -1245,13 +1245,17 @@ processFragmentedDownload() {
   fi
 
   local filesToDelete
-  if [[ ${DELETE_FRAG} -ne 0 ]]; then
+  if [[ ${DELETE_FRAG} -eq 1 ]]; then
     filesToDelete=${fragmentedFiles}
   else
-    local header='Select one or more files to delete:'
-    read -r filesToDelete < <(
-      fzf -m --no-select-1 --header "${header}" <<<"${fragmentedFiles}"
-    )
+    if [[ ${NON_INTERACTIVE} -ne 1 ]]; then
+      # In non-interactive mode with DELETE_FRAG=0,
+      # respect user choice (delete nothing)
+      local header='Select one or more files to delete:'
+      read -r filesToDelete < <(
+        fzf -m --no-select-1 --header "${header}" <<<"${fragmentedFiles}"
+      )
+    fi
   fi
 
   if [[ ${filesToDelete} ]]; then
@@ -1276,11 +1280,7 @@ processFragmentedDownload() {
 
     local deleteFragmentedFiles
     if [[ ${DELETE_FRAG} -eq 0 ]]; then
-      if [[ ${NON_INTERACTIVE} -eq 1 ]]; then
-        # In non-interactive mode, auto-delete fragmented files
-        deleteFragmentedFiles="Delete listed files from disk!"
-        assertSuccess "Auto-deleting fragmented files (non-interactive mode)"
-      else
+      if [[ ${NON_INTERACTIVE} -ne 1 ]]; then
         local pipeDeleteFrag
         read -r pipeDeleteFrag < <(makeFIFO) || exit 1
 
@@ -1295,7 +1295,7 @@ processFragmentedDownload() {
     fi
 
     local file
-    if [[ ${deleteFragmentedFiles} == 'Delete'* || ${DELETE_FRAG} -ne 0 ]]; then
+    if [[ ${deleteFragmentedFiles} == 'Delete'* || ${DELETE_FRAG} -eq 1 ]]; then
       while IFS= read -r file; do
         rm -f -- "${PWD}/${file}" 2>/dev/null
 
