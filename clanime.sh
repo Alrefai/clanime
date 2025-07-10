@@ -216,7 +216,7 @@ clearLines() {
   local -a range
   mapfile -t range < <(seq "$1")
   # shellcheck disable=SC2034
-  for i in ${range[*]}; do echo -ne '\e[1A\e[K'; done
+  for i in "${range[@]}"; do echo -ne '\e[1A\e[K'; done
 }
 
 trimWhiteSpace() {
@@ -592,7 +592,7 @@ playlistFormat() {
   declare -A formatFilter
 
   local formatFromENV
-  for formatFromENV in ${FORMAT_FILTER[*]}; do
+  for formatFromENV in "${FORMAT_FILTER[@]}"; do
     local presetTemplate=${formatFromENV#CLANIME_FORMAT_}
     local presetPrefix=${presetTemplate%%_*}
     [[ ${formatFromENV} == *'_NAME' ]] &&
@@ -1213,7 +1213,7 @@ processFragmentedDownload() {
   local fileExtension=${fragmentedDownload##*.}
   local fragmentedFiles
   read -r fragmentedFiles < <(
-    find -- "${fragmentedDownload%$fileExtension}"*"${fileExtension}"* \
+    find -- "${fragmentedDownload%"$fileExtension"}"*"${fileExtension}"* \
       2>/dev/null
   )
 
@@ -1473,7 +1473,7 @@ download() {
   local -a range
   mapfile -t range < <(seq ${maxAttempts})
 
-  for retry in ${range[*]}; do
+  for retry in "${range[@]}"; do
     local -a ytdArgs
     if [[ ${startNumber} ]]; then
       ytdArgs=('--autonumber-start' "${startNumber}" "${ytdArgsModel[@]}")
@@ -1942,7 +1942,7 @@ waitingFor() {
   local -a range
   mapfile -t range < <(seq ${maxDuration})
 
-  for duration in ${range[*]}; do
+  for duration in "${range[@]}"; do
     local dots
     read -r dots < <(perl -E "print '.' x ${duration}")
 
@@ -2441,6 +2441,7 @@ readonly SUB_COMMAND
 readonly DELETE_FRAG
 readonly DOWNLOAD_DIR
 readonly MAKE_SUB_DIR
+# shellcheck disable=SC2034  # Used in command line processing
 readonly ISO_SUB
 readonly BATCH_ISO_SUB
 
