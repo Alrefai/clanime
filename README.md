@@ -5,6 +5,7 @@ A powerful command-line interface for managing, downloading, and streaming anime
 ## Features
 
 - 📺 **Stream or Download** anime series with a single command
+- 🤖 **Non-Interactive Mode** for automation, scripting, and CI/CD
 - 📋 **Interactive Series Management** with local watchlist storage
 - 🎯 **Smart Navigation** using fzf for fuzzy searching and selection
 - ⚙️ **Flexible Configuration** via environment variables and config files
@@ -68,6 +69,7 @@ clanime
 - `--series <name>` - Override series name
 - `--season-template <type>` - Season numbering (single|multi|custom)
 - `--parse-index <number>` - Starting index for playlist parsing
+- `-y, --non-interactive` - Skip all prompts (automation-friendly)
 
 #### Download Options
 - `--base-dir <path>` - Download to specific directory
@@ -104,6 +106,35 @@ clanime dl "https://example.com/anime" --series "My Anime" --season-template mul
 clanime download "https://example.com/anime" -- --download-archive downloaded.txt
 ```
 
+### Non-Interactive Mode
+
+Perfect for automation, scripting, and CI/CD pipelines. Bypasses all prompts and uses sensible defaults.
+
+```bash
+# Basic non-interactive download
+clanime download "https://youtube.com/playlist?list=..." --non-interactive --series "Anime Name"
+
+# Short flag with custom directory and format
+clanime download "https://example.com/anime" -y --series "My Anime" --dir ~/Downloads --format "best[height<=720]"
+
+# Non-interactive streaming
+clanime stream "https://example.com/anime" --non-interactive
+
+# Automation example with error handling
+if clanime download "$URL" -y --series "$SERIES_NAME" --dir "$DOWNLOAD_DIR"; then
+    echo "Download completed successfully"
+else
+    echo "Download failed with exit code $?"
+fi
+```
+
+**Features:**
+- 🚫 **No Prompts** - Completely silent operation
+- ⚙️ **Auto-Config** - Generates minimal configuration automatically
+- 📁 **Smart Naming** - Uses reliable template: "Series - 01 - Video Title.ext"
+- 🔄 **Auto-Archive** - Automatically handles fragmented files
+- 📋 **Watch List** - Auto-adds series to local watch list
+
 ## Configuration
 
 ### Environment Variables
@@ -112,6 +143,8 @@ clanime download "https://example.com/anime" -- --download-archive downloaded.tx
 - `CLANIME_DEBUG` - Debug mode (1=enhanced errors, 2=verbose trace)
 - `CLANIME_DOWNLOAD_DIR` - Default download directory
 - `CLANIME_MAKE_SUB_DIR` - Create series subdirectories (1=on, 0=off)
+- `CLANIME_NON_INTERACTIVE` - Enable non-interactive mode (0=off, 1=on)
+- `CLANIME_NON_INTERACTIVE_FORMAT` - Default format for non-interactive downloads
 
 #### Template Customization
 - `CLANIME_SERIES_NAME_SUFFIX` - Text after series name (default: " - ")

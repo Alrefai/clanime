@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2317  # Functions called indirectly via traps and nav
 
 echo -ne 'Loading... \r'
 
@@ -80,6 +81,9 @@ BATCH_ISO_SUB=${CLANIME_BATCH_ISO_SUB:-0}
 
 # Automatically delete fragmented files (default: on)
 DELETE_FRAG=${CLANIME_DELETE_FRAG:-1}
+
+# Non-interactive mode for automation (default: off)
+NON_INTERACTIVE=${CLANIME_NON_INTERACTIVE:-0}
 
 #* End of Settings *#
 
@@ -1067,6 +1071,38 @@ addToWatchList() {
   fi
 }
 
+addToWatchListNonInteractive() {
+  [[ -s $LIST_JSON ]] || echo '{ "watching": [] }' >"${LIST_JSON}"
+  [[ ${SERIES} ]] || assertError || exit 1
+
+  local pipeTitles
+  read -r pipeTitles < <(makeFIFO) || exit 1
+  jq -r '.[][]?.title' 2>/dev/null <<<"${JSON}" >"${pipeTitles}" &
+
+  if ! grep -qxF "${SERIES}" "${pipeTitles}" 2>/dev/null; then
+    # Auto-add to watching list without prompting
+    jq \
+      --arg url "${SERIES_URL}" \
+      --arg title "${SERIES}" \
+      --arg extractor "${EXTRACTOR}" \
+      '.watching += [{ $url, $title, $extractor }]' <<<"${JSON}" \
+      >"${LIST_JSON}" 2>/dev/null || assertError || exit 1
+
+    assertSuccess "Series was added to 'watching' list (non-interactive)"
+  else
+    local pipeList
+    read -r pipeList < <(makeFIFO) || exit 1
+
+    jq -cr --arg title "${SERIES}" \
+      'keys[] as $list | select(.[$list][].title==$title) | $list' \
+      <<<"${JSON}" >"${pipeList}" 2>/dev/null &
+
+    local list
+    read -r list <"${pipeList}" || assertError || exit 1
+    assertSuccess "Series was found in '${list}' list (non-interactive)"
+  fi
+}
+
 processConfig() {
   local escape=$1
 
@@ -1107,6 +1143,41 @@ processConfig() {
     read -r createNewConf <"${pipeNewConfig}" || return 0
     [[ ${createNewConf} == 'Create'* ]] && createConfigFile
     return 0
+  fi
+}
+
+createMinimalConfig() {
+  local configFile="${CONFIG_DIR}/${SERIES}.conf"
+  
+  # Create config directory if it doesn't exist
+  if ! mkdir -p "${CONFIG_DIR}" 2>/dev/null; then
+    assertError 'unable to create config directory'
+    exit 1
+  fi
+  
+  # Use environment variable or sensible default for format
+  local defaultFormat="${CLANIME_NON_INTERACTIVE_FORMAT:-best}"
+  
+  # Create minimal config with basic settings
+  cat > "${configFile}" << EOF
+--format ${defaultFormat}
+-o "${SERIES} - %(playlist_index)02d - %(title)s.%(ext)s"
+EOF
+  
+  readonly SERIES_CONFIG="${configFile}"
+  assertSuccess "Auto-generated config: ${configFile/#$HOME/\~}"
+}
+
+processConfigNonInteractive() {
+  if compgen -G "${CONFIG_DIR}/${SERIES}*" >/dev/null; then
+    # Use first existing config file
+    local configFile
+    read -r configFile < <(find "${CONFIG_DIR}/${SERIES}"*.conf | head -n 1)
+    readonly SERIES_CONFIG="${configFile}"
+    assertSuccess "Using existing config: ${configFile/#$HOME/\~}"
+  else
+    # Create minimal config automatically
+    createMinimalConfig
   fi
 }
 
@@ -1255,16 +1326,22 @@ processFragmentedDownload() {
 
     local deleteFragmentedFiles
     if [[ ${DELETE_FRAG} -eq 0 ]]; then
-      local pipeDeleteFrag
-      read -r pipeDeleteFrag < <(makeFIFO) || exit 1
+      if [[ ${NON_INTERACTIVE} -eq 1 ]]; then
+        # In non-interactive mode, auto-delete fragmented files
+        deleteFragmentedFiles="Delete listed files from disk!"
+        assertSuccess "Auto-deleting fragmented files (non-interactive mode)"
+      else
+        local pipeDeleteFrag
+        read -r pipeDeleteFrag < <(makeFIFO) || exit 1
 
-      assertSelection "
-        ${RED_BOLD_TXT}${filesToDelete}${RESET}
-        Delete listed file${pluralFile} from disk!
-        Cancel (esc)
-      " --header-lines "${filesCount}" >"${pipeDeleteFrag}" &
+        assertSelection "
+          ${RED_BOLD_TXT}${filesToDelete}${RESET}
+          Delete listed file${pluralFile} from disk!
+          Cancel (esc)
+        " --header-lines "${filesCount}" >"${pipeDeleteFrag}" &
 
-      read -r deleteFragmentedFiles <"${pipeDeleteFrag}"
+        read -r deleteFragmentedFiles <"${pipeDeleteFrag}"
+      fi
     fi
 
     local file
@@ -2373,6 +2450,10 @@ while [[ $# -gt 0 ]]; do
     shift
     ;;
 
+  --non-interactive | -y)
+    NON_INTERACTIVE=1
+    ;;
+
   --)
     ARGS=("${@:2}")
     unset -v index
@@ -2547,8 +2628,15 @@ trap 'cleanup INT' INT
 if [[ ${SERIES_URL} ]]; then
   [[ ${EXTRACTOR_ENTRY} ]] && processExtractorEntry
   preSelectedSeries
-  addToWatchList
-  until processConfig; do assertNav; done
+  
+  if [[ ${NON_INTERACTIVE} -eq 1 ]]; then
+    addToWatchListNonInteractive
+    processConfigNonInteractive
+  else
+    addToWatchList
+    until processConfig; do assertNav; done
+  fi
+  
   downloadOrStream "${SUB_COMMAND}" "${ARGS[@]}"
 
 elif [[ ! -s ${LIST_JSON} ]]; then
